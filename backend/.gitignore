@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+
+# Environment
+.env
+
+# SQLite databases
+*.db
+*.db-shm
+*.db-wal
+
+# ChromaDB
+chroma_db/
+
+# Scripts output
+scripts/output/
+
+# Alembic (keep versions/, ignore pycache)
+alembic/__pycache__/
