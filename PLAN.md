@@ -1,6 +1,6 @@
 # 營造業內部知識 RAG 系統 — 完整開發計畫書
 
-> 版本：v1.1 | 日期：2026-04-16 | 已確認所有討論事項
+> 版本：v1.3 | 日期：2026-04-16 | 已確認所有討論事項
 
 ---
 
@@ -109,12 +109,16 @@
 │  └──────────────────────────────────────────────────── │  │
 │         │              │                                  │
 │  ┌──────▼──────┐  ┌────▼──────────────────────────────┐  │
-│  │ PostgreSQL  │  │           ChromaDB                  │  │
-│  │ users       │  │  (向量儲存 + 持久化)                │  │
-│  │ conversations│  └───────────────────────────────────┘  │
-│  │ messages    │                                           │
-│  │ summaries   │  ┌────────────────────────────────────┐  │
-│  └─────────────┘  │         OpenAI API                  │  │
+│  │   SQLite    │  │           ChromaDB                  │  │
+│  │ (app.db)    │  │  (向量儲存 + 持久化)                │  │
+│  │ users       │  └───────────────────────────────────┘  │
+│  │ conversations│                                          │
+│  │ messages    │  ┌────────────────────────────────────┐  │
+│  │ summaries   │  │  langgraph.db（SQLite checkpointer）│  │
+│  └─────────────┘  │  Agent 對話狀態持久化               │  │
+│                   └────────────────────────────────────┘  │
+│                   ┌────────────────────────────────────┐  │
+│                   │         OpenAI API                  │  │
 │                   │  text-embedding-3-small / gpt-5.4   │  │
 │                   └────────────────────────────────────┘  │
 └────────────────────────────────────────────────────────── ┘
@@ -172,7 +176,7 @@ Chunk 中的圖片引用格式（統一後）：
   → [intent_classifier] 判斷意圖 (QA / 表單請求)
   → [responder] gpt-5.4 生成回覆 (SSE 串流)
   → [form_structurer] 若為表單請求，結構化輸出
-  → 儲存至 PostgreSQL → 回傳前端
+  → 儲存至 SQLite（app.db）→ 回傳前端
 ```
 
 **表單生成流程**：
@@ -763,7 +767,7 @@ async def summarizer(state: GraphState) -> GraphState:
     old_messages = state["messages"][:-8]   # 保留最近 4 輪（8條）
     summary = await llm.ainvoke(SUMMARIZE_PROMPT + old_messages)
     # 更新 state：移除舊訊息，加入摘要作為 system message
-    # 同步儲存摘要至 PostgreSQL conversation_summaries
+    # 同步儲存摘要至 SQLite conversation_summaries
     return state
 ```
 
@@ -1174,8 +1178,8 @@ api.interceptors.response.use(
 - [ ] 建立全域 `types/index.ts`
 
 **驗收標準**：
-- PostgreSQL 三張 table 存在
-- FastAPI 啟動無錯誤
+- SQLite `app.db` 四張 table 存在（users / conversations / messages / conversation_summaries）
+- FastAPI 啟動無錯誤，18 個路由正常
 - Next.js 啟動顯示預設畫面
 
 ---
@@ -1269,9 +1273,9 @@ api.interceptors.response.use(
 - [ ] `app/graph/nodes/intent.py`：intent_classifier 節點
 - [ ] `app/graph/nodes/generation.py`：responder 節點（串流）
 - [ ] `app/graph/nodes/form.py`：form_structurer 節點
-- [ ] `app/graph/builder.py`：組裝完整 Graph + PostgreSQL checkpointer
+- [ ] `app/graph/builder.py`：組裝完整 Graph + SQLite checkpointer（`AsyncSqliteSaver`，使用 `langgraph.db`）
 - [ ] `app/api/chat.py`：SSE endpoint，接收 Graph stream events
-- [ ] 訊息存入 PostgreSQL（每次對話後）
+- [ ] 訊息存入 SQLite app.db（每次對話後）
 - [ ] Compact 觸發後更新 `conversation_summaries` 表
 
 **驗收標準**：
@@ -1386,12 +1390,19 @@ data/                               # 專案根目錄
 │   │   └── versions/
 │   ├── chroma_db/                  # ChromaDB 持久化（gitignore）
 │   ├── scripts/
-│   │   ├── 01_preprocess.py
-│   │   ├── 02_chunk.py
-│   │   ├── 03_generate_meta.py
-│   │   ├── 04_embed_ingest.py
-│   │   ├── 05_verify.py
+│   │   ├── 01_preprocess.py        # 清理 Type C、正規化圖片引用
+│   │   ├── 02_chunk.py             # 切割，輸出 chunks.jsonl
+│   │   ├── 03_generate_meta.py     # GPT 批量生成 metadata tags
+│   │   ├── 04_review_meta.py       # 讀取人工審查 CSV，合併 chunks_final.jsonl
+│   │   ├── 05_embed_ingest.py      # Embedding + 寫入 ChromaDB（增量更新）
+│   │   ├── 06_verify.py            # 驗證 collection 完整性
 │   │   └── output/                 # 腳本輸出（gitignore）
+│   │       ├── cleaned/            # 前處理後的 .md
+│   │       ├── chunks.jsonl        # 切割結果
+│   │       ├── chunks_final.jsonl  # 審查後最終版本
+│   │       ├── metadata_review.csv # GPT 生成 tags 供人工審查
+│   │       ├── file_hashes.json    # 增量更新 hash 記錄
+│   │       └── verify_report.txt   # 驗證報告
 │   └── app/
 │       ├── main.py
 │       ├── config.py
@@ -1424,29 +1435,30 @@ data/                               # 專案根目錄
 
 ### 11.1 服務組成
 
+> **SQLite 架構說明**：SQLite 為檔案型資料庫，不需要獨立的 postgres 容器。
+> `app.db`（ORM 資料）和 `langgraph.db`（Agent 對話狀態）透過 Docker volume 持久化。
+
 ```yaml
 # docker-compose.yml（規劃）
 services:
-  postgres:
-    image: postgres:16-alpine
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-
   backend:
     build: ./backend
-    depends_on: [postgres]
     volumes:
-      - chroma_data:/app/chroma_db  # ChromaDB 持久化掛載
+      - sqlite_data:/app/data          # app.db + langgraph.db 持久化
+      - chroma_data:/app/chroma_db     # ChromaDB 持久化掛載
+      - ./data_markdown:/app/data_markdown:ro  # 原始文件（唯讀）
     environment:
-      - DATABASE_URL=postgresql+asyncpg://...
+      - DATABASE_URL=sqlite+aiosqlite:////app/data/app.db
+      - SYNC_DATABASE_URL=sqlite:////app/data/app.db
+      - LANGGRAPH_DB_PATH=/app/data/langgraph.db
 
   frontend:
     build: ./frontend
     depends_on: [backend]
 
 volumes:
-  postgres_data:
-  chroma_data:
+  sqlite_data:    # 存放 app.db + langgraph.db
+  chroma_data:    # ChromaDB 向量資料庫
 ```
 
 ### 11.2 後端 Dockerfile（規劃）
@@ -1516,4 +1528,4 @@ CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0"]
 
 ---
 
-*計畫書版本 v1.2 — 2026-04-16 更新：資料庫改採 SQLite（PostgreSQL 安裝失敗）*
+*計畫書版本 v1.3 — 2026-04-16 更新：全面修正 PostgreSQL 殘留引用、Docker 改為 SQLite 架構、腳本目錄對齊（6 支腳本）*
