@@ -12,14 +12,14 @@ chat.py — SSE 聊天端點
 8. 儲存 AI 回覆至 app.db
 """
 
-from __future__ import annotations
+from __future__ import annotations # python 未來性設定，型別註記處理會更彈性
 
-import json
-from typing import AsyncGenerator
+import json # 把dict轉成json因為sse stream
+from typing import AsyncGenerator  
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage # 建立langchain/langraph用的使用者訊息格式
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_current_user
