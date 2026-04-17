@@ -2,9 +2,9 @@ import os
 from contextlib import asynccontextmanager
 
 import aiosqlite
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from app.config import settings
@@ -48,13 +48,52 @@ app.include_router(conversations.router, prefix="/api")
 app.include_router(chat.router, prefix="/api")
 app.include_router(export.router, prefix="/api")
 
-# 靜態圖片服務（data_markdown/img/ → /api/images/）
-# 路徑：backend/app/main.py → ../../data_markdown/img/
 _img_dir = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "data_markdown", "img")
 )
-if os.path.isdir(_img_dir):
-    app.mount("/api/images", StaticFiles(directory=_img_dir), name="images")
+
+
+@app.get("/api/images/{image_path:path}")
+async def serve_image(image_path: str):
+    """
+    圖片服務端點，支援兩種目錄結構：
+    1. img/<folder>/<file>.png          （無括號，直接存取）
+    2. img/<folder with date>/<folder>/<file>.png （有括號的父目錄，多一層）
+
+    解析策略：先試直接路徑，找不到就在 img/ 下搜尋同名子目錄。
+    """
+    if not os.path.isdir(_img_dir):
+        raise HTTPException(status_code=404, detail="Image directory not found")
+
+    # 1. 直接路徑（現有可運作的路徑）
+    direct = os.path.normpath(os.path.join(_img_dir, image_path))
+    if direct.startswith(_img_dir) and os.path.isfile(direct):
+        return FileResponse(direct)
+
+    # 2. 搜尋：image_path = "010102工務所辦公室設置/017.png"
+    #    → parts[0] = "010102工務所辦公室設置", filename = "017.png"
+    parts = image_path.replace("\\", "/").split("/")
+    if len(parts) >= 2:
+        target_folder = parts[0]
+        sub_path = "/".join(parts[1:])
+        for entry in os.scandir(_img_dir):
+            if not entry.is_dir():
+                continue
+            # 找名稱以 target_folder 開頭的父目錄（含括號版本）
+            if entry.name.startswith(target_folder):
+                candidate = os.path.normpath(
+                    os.path.join(entry.path, target_folder, sub_path)
+                )
+                if candidate.startswith(_img_dir) and os.path.isfile(candidate):
+                    return FileResponse(candidate)
+                # 也試不含 target_folder 中間層的路徑
+                candidate2 = os.path.normpath(
+                    os.path.join(entry.path, sub_path)
+                )
+                if candidate2.startswith(_img_dir) and os.path.isfile(candidate2):
+                    return FileResponse(candidate2)
+
+    raise HTTPException(status_code=404, detail=f"Image not found: {image_path}")
 
 
 @app.get("/api/health")
