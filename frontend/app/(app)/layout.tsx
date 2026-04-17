@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { tryRestoreSession } from "@/lib/auth";
 import { useAuthStore } from "@/store/authStore";
+import Sidebar from "@/components/layout/Sidebar";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -11,7 +12,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    // On mount, try to restore session via HttpOnly refresh token cookie
     const init = async () => {
       if (!accessToken) {
         const ok = await tryRestoreSession();
@@ -27,24 +27,26 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   if (!ready) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <span className="text-gray-400 text-sm">載入中...</span>
+      <div className="min-h-screen flex items-center justify-center" style={{ background: "var(--sidebar-bg)" }}>
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin-custom" />
+          <span className="text-slate-500 text-sm">載入中...</span>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-white">
-      {/* Sidebar placeholder — Phase 5 */}
-      <aside className="w-64 shrink-0 border-r border-gray-200 bg-gray-50 flex flex-col">
-        <div className="p-4 border-b border-gray-200">
-          <span className="font-semibold text-gray-700 text-sm">營造知識助理</span>
-        </div>
-        <div className="flex-1 overflow-y-auto p-2">
-          {/* Conversation list — Phase 5 */}
-        </div>
-      </aside>
-      <main className="flex-1 flex flex-col overflow-hidden">{children}</main>
+    <div className="flex h-screen overflow-hidden" style={{ background: "var(--content-bg)" }}>
+      {/* Sidebar */}
+      <div className="w-64 shrink-0 flex flex-col" style={{ background: "var(--sidebar-bg)" }}>
+        <Sidebar />
+      </div>
+
+      {/* Main Content */}
+      <main className="flex-1 flex flex-col overflow-hidden min-w-0">
+        {children}
+      </main>
     </div>
   );
 }
