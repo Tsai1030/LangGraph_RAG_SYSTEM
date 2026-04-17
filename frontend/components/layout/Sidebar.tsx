@@ -2,9 +2,10 @@
 
 import { useEffect, useState, useRef } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import {
-  Plus, Trash2, LogOut, HardHat, Pencil, Check, X, PanelLeftClose, PanelLeftOpen,
-} from "lucide-react";
+import { Plus, Trash2, LogOut, Pencil, Check, X, PanelLeft, MessageSquare } from "lucide-react";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import { Separator } from "@/components/ui/separator";
+import { cn } from "@/lib/utils";
 import api from "@/lib/api";
 import { logout } from "@/lib/auth";
 import { useChatStore } from "@/store/chatStore";
@@ -27,6 +28,38 @@ function timeAgo(iso: string): string {
   return new Date(iso).toLocaleDateString("zh-TW");
 }
 
+function TipBtn({
+  onClick, title, children, danger = false, className = "",
+}: {
+  onClick?: (e: React.MouseEvent) => void;
+  title: string;
+  children: React.ReactNode;
+  danger?: boolean;
+  className?: string;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            onClick={onClick}
+            className={cn(
+              "flex items-center justify-center rounded-md transition-colors",
+              danger
+                ? "text-zinc-500 hover:text-red-500 hover:bg-red-500/10"
+                : "text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700",
+              className
+            )}
+          />
+        }
+      >
+        {children}
+      </TooltipTrigger>
+      <TooltipContent side="right">{title}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 export default function Sidebar({ collapsed, onToggle }: Props) {
   const router = useRouter();
   const pathname = usePathname();
@@ -35,24 +68,19 @@ export default function Sidebar({ collapsed, onToggle }: Props) {
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
-  const editInputRef = useRef<HTMLInputElement>(null);
+  const editRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    api.get<ConversationOut[]>("/conversations").then(({ data }) => {
-      setConversations(data);
-    }).catch(() => {});
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    api.get<ConversationOut[]>("/conversations").then(({ data }) => setConversations(data)).catch(() => {});
+  }, []); // eslint-disable-line
 
   useEffect(() => {
-    if (editingId && editInputRef.current) {
-      editInputRef.current.focus();
-      editInputRef.current.select();
-    }
+    if (editingId) editRef.current?.focus();
   }, [editingId]);
 
   const activeId = pathname.match(/\/chat\/([^/]+)/)?.[1] ?? null;
 
-  const handleNewChat = async () => {
+  const handleNew = async () => {
     try {
       const { data } = await api.post<ConversationOut>("/conversations", {});
       addConversation(data);
@@ -92,147 +120,171 @@ export default function Sidebar({ collapsed, onToggle }: Props) {
   };
 
   return (
-    <aside className="flex flex-col h-full overflow-hidden">
+    <aside className="flex flex-col h-full overflow-hidden bg-zinc-950 text-zinc-400">
       {/* Header */}
-      {collapsed ? (
-        <div className="flex items-center justify-center py-3.5 border-b border-slate-700/60 shrink-0">
-          <button
-            onClick={onToggle}
-            className="p-1.5 rounded-md bg-slate-700 text-white hover:bg-slate-600 transition-colors"
-            title="展開側欄"
-          >
-            <PanelLeftOpen size={15} />
-          </button>
-        </div>
-      ) : (
-        <div className="flex items-center gap-2.5 px-3 py-3.5 border-b border-slate-700/60 shrink-0">
-          <div className="w-7 h-7 rounded-lg bg-blue-600 flex items-center justify-center shrink-0">
-            <HardHat size={15} className="text-white" />
+      <div className={cn("flex items-center h-14 shrink-0 px-3 gap-2", collapsed && "justify-center")}>
+        {!collapsed && (
+          <div className="flex-1 flex items-center gap-2.5 min-w-0">
+            <div className="size-6 rounded-md bg-zinc-100 flex items-center justify-center shrink-0">
+              <MessageSquare size={13} className="text-zinc-900" strokeWidth={2.5} />
+            </div>
+            <span className="text-zinc-100 font-medium text-sm truncate">營造知識助理</span>
           </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-slate-100 font-semibold text-sm leading-tight truncate">營造知識助理</p>
-            <p className="text-slate-500 text-[10px] truncate">RAG 智能查詢系統</p>
-          </div>
-          <button
-            onClick={onToggle}
-            className="shrink-0 p-1 rounded-md text-white hover:bg-slate-700 transition-colors"
-            title="收合側欄"
+        )}
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button
+                onClick={onToggle}
+                className="size-7 flex items-center justify-center rounded-md text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors shrink-0"
+              />
+            }
           >
-            <PanelLeftClose size={15} />
-          </button>
-        </div>
-      )}
-
-      {/* New Chat */}
-      <div className="px-2 pt-2.5 pb-1 shrink-0">
-        <button
-          onClick={handleNewChat}
-          title="新對話"
-          className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-700 transition-colors group ${
-            collapsed ? "justify-center" : ""
-          }`}
-        >
-          <Plus size={15} className="text-blue-400 group-hover:text-blue-300 shrink-0" />
-          {!collapsed && <span>新對話</span>}
-        </button>
+            <PanelLeft size={15} />
+          </TooltipTrigger>
+          <TooltipContent side="right">{collapsed ? "展開" : "收合"}</TooltipContent>
+        </Tooltip>
       </div>
 
-      {/* Conversation List */}
-      <nav className="flex-1 overflow-y-auto px-2 pb-2 sidebar-scroll space-y-0.5">
-        {!collapsed && conversations.length === 0 && (
-          <p className="text-center text-slate-600 text-xs py-8">還沒有對話紀錄</p>
-        )}
-        {conversations.map((conv) => {
-          const isActive = conv.id === activeId;
-          const isEditing = editingId === conv.id;
+      <Separator className="bg-zinc-800/60" />
 
-          if (collapsed) {
-            return (
-              <button
-                key={conv.id}
-                onClick={() => router.push(`/chat/${conv.id}`)}
-                title={conv.title ?? "新對話"}
-                className={`w-full flex items-center justify-center p-2 rounded-lg transition-colors ${
-                  isActive ? "bg-slate-700" : "hover:bg-slate-800"
-                }`}
-              >
-                <span className="w-2 h-2 rounded-full bg-slate-400 shrink-0" />
-              </button>
-            );
-          }
-
-          return (
-            <div
-              key={conv.id}
-              onClick={() => !isEditing && router.push(`/chat/${conv.id}`)}
-              className={`group relative rounded-lg px-3 py-2.5 cursor-pointer transition-colors ${
-                isActive
-                  ? "bg-slate-700 text-slate-100"
-                  : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
-              }`}
+      {/* New Chat */}
+      <div className="px-2 pt-2 pb-1">
+        {collapsed ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  onClick={handleNew}
+                  className="w-full flex items-center justify-center size-8 rounded-md text-zinc-500 hover:text-zinc-100 hover:bg-zinc-800 transition-colors mx-auto"
+                />
+              }
             >
-              {isEditing ? (
-                <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                  <input
-                    ref={editInputRef}
-                    value={editValue}
-                    onChange={(e) => setEditValue(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") confirmRename(conv.id);
-                      if (e.key === "Escape") setEditingId(null);
-                    }}
-                    className="flex-1 bg-slate-600 text-slate-100 text-xs rounded px-2 py-1 outline-none min-w-0"
-                  />
-                  <button onClick={() => confirmRename(conv.id)} className="p-1 rounded hover:bg-slate-600 text-emerald-400">
-                    <Check size={12} />
-                  </button>
-                  <button onClick={() => setEditingId(null)} className="p-1 rounded hover:bg-slate-600 text-slate-400">
-                    <X size={12} />
-                  </button>
-                </div>
-              ) : (
-                <>
-                  <p className="text-xs font-medium leading-tight truncate pr-10">
-                    {conv.title ?? "新對話"}
-                  </p>
-                  <p className="text-[10px] mt-0.5 opacity-50 truncate">
-                    {timeAgo(conv.updated_at)}
-                  </p>
-                  <div className="absolute right-2 top-1/2 -translate-y-1/2 hidden group-hover:flex items-center gap-0.5">
-                    <button
-                      onClick={(e) => startEdit(e, conv)}
-                      className="p-1 rounded hover:bg-slate-600 text-slate-500 hover:text-slate-200 transition-colors"
-                      title="重新命名"
-                    >
-                      <Pencil size={11} />
+              <Plus size={16} />
+            </TooltipTrigger>
+            <TooltipContent side="right">新對話</TooltipContent>
+          </Tooltip>
+        ) : (
+          <button
+            onClick={handleNew}
+            className="w-full flex items-center gap-2 px-2.5 h-8 rounded-md text-xs text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors"
+          >
+            <Plus size={14} className="shrink-0" />
+            <span>新對話</span>
+          </button>
+        )}
+      </div>
+
+      {/* Conversation list */}
+      <nav className="flex-1 overflow-y-auto px-2 pb-2 sidebar-scroll">
+        {!collapsed && conversations.length === 0 && (
+          <p className="text-center text-zinc-600 text-xs py-10">尚無對話紀錄</p>
+        )}
+        <div className="flex flex-col gap-0.5">
+          {conversations.map((conv) => {
+            const isActive = conv.id === activeId;
+            const isEditing = editingId === conv.id;
+
+            if (collapsed) {
+              return (
+                <Tooltip key={conv.id}>
+                  <TooltipTrigger
+                    render={
+                      <button
+                        onClick={() => router.push(`/chat/${conv.id}`)}
+                        className={cn(
+                          "w-full flex items-center justify-center h-8 rounded-md transition-colors",
+                          isActive ? "bg-zinc-800 text-zinc-100" : "hover:bg-zinc-800/60 text-zinc-500"
+                        )}
+                      />
+                    }
+                  >
+                    <MessageSquare size={13} />
+                  </TooltipTrigger>
+                  <TooltipContent side="right">{conv.title ?? "新對話"}</TooltipContent>
+                </Tooltip>
+              );
+            }
+
+            return (
+              <div
+                key={conv.id}
+                onClick={() => !isEditing && router.push(`/chat/${conv.id}`)}
+                className={cn(
+                  "group relative flex flex-col px-2.5 py-2 rounded-md cursor-pointer transition-colors",
+                  isActive ? "bg-zinc-800 text-zinc-100" : "hover:bg-zinc-800/60 text-zinc-400 hover:text-zinc-200"
+                )}
+              >
+                {isEditing ? (
+                  <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      ref={editRef}
+                      value={editValue}
+                      onChange={(e) => setEditValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") confirmRename(conv.id);
+                        if (e.key === "Escape") setEditingId(null);
+                      }}
+                      className="flex-1 bg-zinc-700 text-zinc-100 text-xs rounded-md px-2 py-1 outline-none border border-zinc-600 min-w-0"
+                    />
+                    <button onClick={() => confirmRename(conv.id)} className="text-emerald-400 hover:text-emerald-300 p-0.5">
+                      <Check size={13} />
                     </button>
-                    <button
-                      onClick={(e) => handleDelete(e, conv.id)}
-                      className="p-1 rounded hover:bg-red-500/20 text-slate-500 hover:text-red-400 transition-colors"
-                      title="刪除對話"
-                    >
-                      <Trash2 size={11} />
+                    <button onClick={() => setEditingId(null)} className="text-zinc-500 hover:text-zinc-300 p-0.5">
+                      <X size={13} />
                     </button>
                   </div>
-                </>
-              )}
-            </div>
-          );
-        })}
+                ) : (
+                  <>
+                    <span className="text-xs font-medium truncate pr-12 leading-snug">
+                      {conv.title ?? "新對話"}
+                    </span>
+                    <span className="text-[10px] text-zinc-600 mt-0.5">
+                      {timeAgo(conv.updated_at)}
+                    </span>
+                    <div className="absolute right-1.5 top-1/2 -translate-y-1/2 hidden group-hover:flex items-center gap-0.5">
+                      <TipBtn onClick={(e) => startEdit(e, conv)} title="重新命名" className="size-6">
+                        <Pencil size={11} />
+                      </TipBtn>
+                      <TipBtn onClick={(e) => handleDelete(e, conv.id)} title="刪除" danger className="size-6">
+                        <Trash2 size={11} />
+                      </TipBtn>
+                    </div>
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </nav>
 
+      <Separator className="bg-zinc-800/60" />
+
       {/* Logout */}
-      <div className="px-2 py-2.5 border-t border-slate-700/60 shrink-0">
-        <button
-          onClick={handleLogout}
-          title="登出"
-          className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs text-slate-500 hover:text-slate-300 hover:bg-slate-800 transition-colors ${
-            collapsed ? "justify-center" : ""
-          }`}
-        >
-          <LogOut size={13} className="shrink-0" />
-          {!collapsed && <span>登出</span>}
-        </button>
+      <div className="px-2 py-2">
+        {collapsed ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  onClick={handleLogout}
+                  className="w-full flex items-center justify-center h-8 rounded-md text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+                />
+              }
+            >
+              <LogOut size={14} />
+            </TooltipTrigger>
+            <TooltipContent side="right">登出</TooltipContent>
+          </Tooltip>
+        ) : (
+          <button
+            onClick={handleLogout}
+            className="w-full flex items-center gap-2 px-2.5 h-8 rounded-md text-xs text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+          >
+            <LogOut size={13} className="shrink-0" />
+            <span>登出</span>
+          </button>
+        )}
       </div>
     </aside>
   );

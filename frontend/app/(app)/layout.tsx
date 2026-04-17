@@ -43,7 +43,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <div
         className="shrink-0 flex flex-col overflow-hidden"
         style={{
-          background: "var(--sidebar-bg)",
+          background: "#09090b",
           width: collapsed ? "56px" : "256px",
           transition: "width 0.25s cubic-bezier(0.4, 0, 0.2, 1)",
         }}

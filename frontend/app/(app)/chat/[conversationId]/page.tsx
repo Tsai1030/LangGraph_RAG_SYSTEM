@@ -131,25 +131,15 @@ export default function ChatPage() {
     abortRef.current?.abort();
   };
 
-  if (loading) {
-    return (
-      <div className="flex-1 flex items-center justify-center">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin-custom" />
-          <span className="text-slate-400 text-sm">載入對話中...</span>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full bg-background">
       <MessageList
         messages={messages}
         streamingMessage={streamingMessage}
         streamingFormData={streamingFormData}
         streamingSources={streamingSources}
         onSuggestedQuery={handleSend}
+        loading={loading}
       />
       <InputBar
         onSend={handleSend}

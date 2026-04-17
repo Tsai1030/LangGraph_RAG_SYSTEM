@@ -1,23 +1,18 @@
 "use client";
 
 import { useState } from "react";
-import { Download, FileSpreadsheet, FileText } from "lucide-react";
+import { Download } from "lucide-react";
 import { getAccessToken } from "@/store/authStore";
 import type { FormData } from "@/types";
 
-interface Props {
-  formData: FormData;
-  filename?: string;
-}
+interface Props { formData: FormData; filename?: string; }
 
 export default function ExportButton({ formData, filename = "表單" }: Props) {
-  const [loadingExcel, setLoadingExcel] = useState(false);
-  const [loadingCsv, setLoadingCsv] = useState(false);
+  const [loading, setLoading] = useState<"excel" | "csv" | null>(null);
 
   const download = async (type: "excel" | "csv") => {
-    const setLoading = type === "excel" ? setLoadingExcel : setLoadingCsv;
-    setLoading(true);
-
+    if (loading) return;
+    setLoading(type);
     try {
       const token = getAccessToken();
       const res = await fetch(`/api/export/${type}`, {
@@ -28,9 +23,7 @@ export default function ExportButton({ formData, filename = "表單" }: Props) {
         },
         body: JSON.stringify({ form_data: formData, filename }),
       });
-
-      if (!res.ok) throw new Error("匯出失敗");
-
+      if (!res.ok) throw new Error();
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -40,39 +33,27 @@ export default function ExportButton({ formData, filename = "表單" }: Props) {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-    } catch (err) {
-      console.error("Export error:", err);
-    } finally {
-      setLoading(false);
-    }
+    } catch {}
+    finally { setLoading(null); }
   };
 
   return (
-    <div className="flex gap-2 mt-2">
-      <button
-        onClick={() => download("excel")}
-        disabled={loadingExcel}
-        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white transition-colors"
-      >
-        {loadingExcel ? (
-          <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin-custom" />
-        ) : (
-          <FileSpreadsheet size={14} />
-        )}
-        下載 Excel
-      </button>
-      <button
-        onClick={() => download("csv")}
-        disabled={loadingCsv}
-        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-600 hover:bg-slate-700 disabled:bg-slate-400 text-white transition-colors"
-      >
-        {loadingCsv ? (
-          <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin-custom" />
-        ) : (
-          <FileText size={14} />
-        )}
-        下載 CSV
-      </button>
+    <div className="flex gap-2 mt-2.5">
+      {(["excel", "csv"] as const).map((type) => (
+        <button
+          key={type}
+          onClick={() => download(type)}
+          disabled={!!loading}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium border border-zinc-200 text-zinc-600 hover:text-zinc-900 hover:border-zinc-300 hover:bg-zinc-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors bg-white"
+        >
+          {loading === type ? (
+            <span className="size-3 border border-zinc-400 border-t-transparent rounded-full animate-spin-fast" />
+          ) : (
+            <Download size={11} />
+          )}
+          {type === "excel" ? "下載 Excel" : "下載 CSV"}
+        </button>
+      ))}
     </div>
   );
 }

@@ -2,6 +2,7 @@
 
 import { useRef, useState, useEffect } from "react";
 import { ArrowUp, Square } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface Props {
   onSend: (message: string) => void;
@@ -12,14 +13,13 @@ interface Props {
 
 export default function InputBar({ onSend, onStop, isStreaming, disabled }: Props) {
   const [value, setValue] = useState("");
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const ref = useRef<HTMLTextAreaElement>(null);
 
-  // Auto resize textarea
   useEffect(() => {
-    const el = textareaRef.current;
+    const el = ref.current;
     if (!el) return;
     el.style.height = "auto";
-    el.style.height = Math.min(el.scrollHeight, 200) + "px";
+    el.style.height = Math.min(el.scrollHeight, 180) + "px";
   }, [value]);
 
   const handleSend = () => {
@@ -29,65 +29,60 @@ export default function InputBar({ onSend, onStop, isStreaming, disabled }: Prop
     onSend(msg);
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  };
-
   const canSend = value.trim().length > 0 && !isStreaming && !disabled;
 
   return (
     <div
-      className="px-4 py-3"
+      className="px-4 pb-4 pt-3"
       style={{
-        background: "rgba(255, 255, 255, 0.75)",
-        backdropFilter: "blur(16px)",
-        WebkitBackdropFilter: "blur(16px)",
+        background: "rgba(255,253,250,0.82)",
+        backdropFilter: "blur(20px)",
+        WebkitBackdropFilter: "blur(20px)",
       }}
     >
-      <div className="max-w-3xl mx-auto">
-        <div className={`flex items-end gap-2 rounded-2xl border px-4 py-2.5 shadow-sm transition-colors ${
-          disabled ? "border-slate-200 bg-slate-50" : "border-slate-300 bg-white focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100"
-        }`}>
+      <div className="max-w-2xl mx-auto">
+        <div className={cn(
+          "flex items-end gap-2 rounded-2xl border bg-white shadow-sm px-4 py-3 transition-shadow",
+          disabled ? "border-zinc-200 opacity-60" : "border-zinc-200 hover:border-zinc-300 focus-within:border-zinc-400 focus-within:shadow-md"
+        )}>
           <textarea
-            ref={textareaRef}
+            ref={ref}
             value={value}
             onChange={(e) => setValue(e.target.value)}
-            onKeyDown={handleKeyDown}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
+            }}
             disabled={disabled}
-            placeholder={isStreaming ? "AI 回覆中..." : "輸入問題，例如：動員開工需要哪些初期計畫？"}
+            placeholder={isStreaming ? "回覆中…" : "輸入問題，例如：動員開工需要哪些初期計畫？"}
             rows={1}
-            className="flex-1 bg-transparent text-sm text-slate-800 placeholder-slate-400 outline-none resize-none auto-resize leading-relaxed disabled:cursor-not-allowed"
-            style={{ maxHeight: "200px", overflowY: "auto" }}
+            className="flex-1 text-sm text-zinc-800 placeholder-zinc-400 bg-transparent outline-none resize-none leading-relaxed disabled:cursor-not-allowed"
+            style={{ maxHeight: "180px", overflowY: "auto" }}
           />
 
           {isStreaming ? (
             <button
               onClick={onStop}
-              className="shrink-0 w-8 h-8 rounded-full bg-slate-700 hover:bg-slate-800 flex items-center justify-center transition-colors"
-              title="停止生成"
+              className="shrink-0 size-8 rounded-full bg-zinc-900 hover:bg-zinc-700 flex items-center justify-center transition-colors"
+              title="停止"
             >
-              <Square size={13} className="text-white fill-white" />
+              <Square size={12} className="text-white fill-white" />
             </button>
           ) : (
             <button
               onClick={handleSend}
               disabled={!canSend}
-              className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-all ${
-                canSend
-                  ? "bg-blue-600 hover:bg-blue-700 shadow-sm scale-100"
-                  : "bg-slate-200 cursor-not-allowed scale-95"
-              }`}
-              title="送出 (Enter)"
+              className={cn(
+                "shrink-0 size-8 rounded-full flex items-center justify-center transition-all",
+                canSend ? "bg-zinc-900 hover:bg-zinc-700" : "bg-zinc-100 cursor-not-allowed"
+              )}
+              title="送出"
             >
-              <ArrowUp size={15} className={canSend ? "text-white" : "text-slate-400"} />
+              <ArrowUp size={14} className={canSend ? "text-white" : "text-zinc-400"} />
             </button>
           )}
         </div>
-        <p className="text-center text-[11px] text-slate-400 mt-1.5">
-          Enter 送出 · Shift+Enter 換行
+        <p className="text-center text-[11px] text-zinc-400 mt-1.5 select-none">
+          AI有時會犯錯·需要二次查驗
         </p>
       </div>
     </div>
