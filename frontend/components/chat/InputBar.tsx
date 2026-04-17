@@ -39,7 +39,14 @@ export default function InputBar({ onSend, onStop, isStreaming, disabled }: Prop
   const canSend = value.trim().length > 0 && !isStreaming && !disabled;
 
   return (
-    <div className="border-t border-slate-200 bg-white px-4 py-3">
+    <div
+      className="px-4 py-3"
+      style={{
+        background: "rgba(255, 255, 255, 0.75)",
+        backdropFilter: "blur(16px)",
+        WebkitBackdropFilter: "blur(16px)",
+      }}
+    >
       <div className="max-w-3xl mx-auto">
         <div className={`flex items-end gap-2 rounded-2xl border px-4 py-2.5 shadow-sm transition-colors ${
           disabled ? "border-slate-200 bg-slate-50" : "border-slate-300 bg-white focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100"

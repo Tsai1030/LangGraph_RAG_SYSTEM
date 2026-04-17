@@ -10,6 +10,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const accessToken = useAuthStore((s) => s.accessToken);
   const [ready, setReady] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
     const init = async () => {
@@ -38,9 +39,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex h-screen overflow-hidden" style={{ background: "var(--content-bg)" }}>
-      {/* Sidebar */}
-      <div className="w-64 shrink-0 flex flex-col" style={{ background: "var(--sidebar-bg)" }}>
-        <Sidebar />
+      {/* Sidebar — animated width */}
+      <div
+        className="shrink-0 flex flex-col overflow-hidden"
+        style={{
+          background: "var(--sidebar-bg)",
+          width: collapsed ? "56px" : "256px",
+          transition: "width 0.25s cubic-bezier(0.4, 0, 0.2, 1)",
+        }}
+      >
+        <Sidebar collapsed={collapsed} onToggle={() => setCollapsed((v) => !v)} />
       </div>
 
       {/* Main Content */}

@@ -3,12 +3,17 @@
 import { useEffect, useState, useRef } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import {
-  Plus, Trash2, LogOut, HardHat, Pencil, Check, X,
+  Plus, Trash2, LogOut, HardHat, Pencil, Check, X, PanelLeftClose, PanelLeftOpen,
 } from "lucide-react";
 import api from "@/lib/api";
 import { logout } from "@/lib/auth";
 import { useChatStore } from "@/store/chatStore";
 import type { ConversationOut } from "@/types";
+
+interface Props {
+  collapsed: boolean;
+  onToggle: () => void;
+}
 
 function timeAgo(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -22,7 +27,7 @@ function timeAgo(iso: string): string {
   return new Date(iso).toLocaleDateString("zh-TW");
 }
 
-export default function Sidebar() {
+export default function Sidebar({ collapsed, onToggle }: Props) {
   const router = useRouter();
   const pathname = usePathname();
   const { conversations, setConversations, addConversation, removeConversation, updateConversationTitle } =
@@ -32,7 +37,6 @@ export default function Sidebar() {
   const [editValue, setEditValue] = useState("");
   const editInputRef = useRef<HTMLInputElement>(null);
 
-  // Fetch conversation list on mount
   useEffect(() => {
     api.get<ConversationOut[]>("/conversations").then(({ data }) => {
       setConversations(data);
@@ -61,9 +65,7 @@ export default function Sidebar() {
     try {
       await api.delete(`/conversations/${id}`);
       removeConversation(id);
-      if (activeId === id) {
-        router.push("/new");
-      }
+      if (activeId === id) router.push("/new");
     } catch {}
   };
 
@@ -84,50 +86,80 @@ export default function Sidebar() {
     setEditingId(null);
   };
 
-  const cancelEdit = () => setEditingId(null);
-
   const handleLogout = async () => {
     try { await logout(); } catch {}
     router.replace("/login");
   };
 
   return (
-    <aside
-      className="flex flex-col h-full"
-      style={{ background: "var(--sidebar-bg)" }}
-    >
-      {/* Logo */}
-      <div className="flex items-center gap-2.5 px-4 py-4 border-b border-slate-700/60">
-        <div className="w-7 h-7 rounded-lg bg-blue-600 flex items-center justify-center shrink-0">
-          <HardHat size={15} className="text-white" />
+    <aside className="flex flex-col h-full overflow-hidden">
+      {/* Header */}
+      {collapsed ? (
+        <div className="flex items-center justify-center py-3.5 border-b border-slate-700/60 shrink-0">
+          <button
+            onClick={onToggle}
+            className="p-1.5 rounded-md bg-slate-700 text-white hover:bg-slate-600 transition-colors"
+            title="展開側欄"
+          >
+            <PanelLeftOpen size={15} />
+          </button>
         </div>
-        <div className="min-w-0">
-          <p className="text-slate-100 font-semibold text-sm leading-tight truncate">
-            營造知識助理
-          </p>
-          <p className="text-slate-500 text-[10px] truncate">RAG 智能查詢系統</p>
+      ) : (
+        <div className="flex items-center gap-2.5 px-3 py-3.5 border-b border-slate-700/60 shrink-0">
+          <div className="w-7 h-7 rounded-lg bg-blue-600 flex items-center justify-center shrink-0">
+            <HardHat size={15} className="text-white" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-slate-100 font-semibold text-sm leading-tight truncate">營造知識助理</p>
+            <p className="text-slate-500 text-[10px] truncate">RAG 智能查詢系統</p>
+          </div>
+          <button
+            onClick={onToggle}
+            className="shrink-0 p-1 rounded-md text-white hover:bg-slate-700 transition-colors"
+            title="收合側欄"
+          >
+            <PanelLeftClose size={15} />
+          </button>
         </div>
-      </div>
+      )}
 
       {/* New Chat */}
-      <div className="px-3 pt-3 pb-1">
+      <div className="px-2 pt-2.5 pb-1 shrink-0">
         <button
           onClick={handleNewChat}
-          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-700 transition-colors group"
+          title="新對話"
+          className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-700 transition-colors group ${
+            collapsed ? "justify-center" : ""
+          }`}
         >
-          <Plus size={15} className="text-blue-400 group-hover:text-blue-300" />
-          新對話
+          <Plus size={15} className="text-blue-400 group-hover:text-blue-300 shrink-0" />
+          {!collapsed && <span>新對話</span>}
         </button>
       </div>
 
       {/* Conversation List */}
-      <nav className="flex-1 overflow-y-auto px-3 pb-2 sidebar-scroll space-y-0.5">
-        {conversations.length === 0 && (
+      <nav className="flex-1 overflow-y-auto px-2 pb-2 sidebar-scroll space-y-0.5">
+        {!collapsed && conversations.length === 0 && (
           <p className="text-center text-slate-600 text-xs py-8">還沒有對話紀錄</p>
         )}
         {conversations.map((conv) => {
           const isActive = conv.id === activeId;
           const isEditing = editingId === conv.id;
+
+          if (collapsed) {
+            return (
+              <button
+                key={conv.id}
+                onClick={() => router.push(`/chat/${conv.id}`)}
+                title={conv.title ?? "新對話"}
+                className={`w-full flex items-center justify-center p-2 rounded-lg transition-colors ${
+                  isActive ? "bg-slate-700" : "hover:bg-slate-800"
+                }`}
+              >
+                <span className="w-2 h-2 rounded-full bg-slate-400 shrink-0" />
+              </button>
+            );
+          }
 
           return (
             <div
@@ -140,30 +172,21 @@ export default function Sidebar() {
               }`}
             >
               {isEditing ? (
-                <div
-                  className="flex items-center gap-1"
-                  onClick={(e) => e.stopPropagation()}
-                >
+                <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                   <input
                     ref={editInputRef}
                     value={editValue}
                     onChange={(e) => setEditValue(e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") confirmRename(conv.id);
-                      if (e.key === "Escape") cancelEdit();
+                      if (e.key === "Escape") setEditingId(null);
                     }}
                     className="flex-1 bg-slate-600 text-slate-100 text-xs rounded px-2 py-1 outline-none min-w-0"
                   />
-                  <button
-                    onClick={() => confirmRename(conv.id)}
-                    className="p-1 rounded hover:bg-slate-600 text-emerald-400"
-                  >
+                  <button onClick={() => confirmRename(conv.id)} className="p-1 rounded hover:bg-slate-600 text-emerald-400">
                     <Check size={12} />
                   </button>
-                  <button
-                    onClick={cancelEdit}
-                    className="p-1 rounded hover:bg-slate-600 text-slate-400"
-                  >
+                  <button onClick={() => setEditingId(null)} className="p-1 rounded hover:bg-slate-600 text-slate-400">
                     <X size={12} />
                   </button>
                 </div>
@@ -175,8 +198,6 @@ export default function Sidebar() {
                   <p className="text-[10px] mt-0.5 opacity-50 truncate">
                     {timeAgo(conv.updated_at)}
                   </p>
-
-                  {/* Hover actions */}
                   <div className="absolute right-2 top-1/2 -translate-y-1/2 hidden group-hover:flex items-center gap-0.5">
                     <button
                       onClick={(e) => startEdit(e, conv)}
@@ -201,13 +222,16 @@ export default function Sidebar() {
       </nav>
 
       {/* Logout */}
-      <div className="px-3 py-3 border-t border-slate-700/60">
+      <div className="px-2 py-2.5 border-t border-slate-700/60 shrink-0">
         <button
           onClick={handleLogout}
-          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-slate-500 hover:text-slate-300 hover:bg-slate-800 transition-colors"
+          title="登出"
+          className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs text-slate-500 hover:text-slate-300 hover:bg-slate-800 transition-colors ${
+            collapsed ? "justify-center" : ""
+          }`}
         >
-          <LogOut size={13} />
-          登出
+          <LogOut size={13} className="shrink-0" />
+          {!collapsed && <span>登出</span>}
         </button>
       </div>
     </aside>

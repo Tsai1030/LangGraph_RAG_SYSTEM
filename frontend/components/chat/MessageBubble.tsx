@@ -16,6 +16,8 @@ interface Props {
 }
 
 const markdownComponents: Components = {
+  // Render p as div to avoid hydration errors when img (block) is inside p
+  p: ({ children }) => <div className="my-1.5 leading-relaxed">{children}</div>,
   img: (props) => {
     const src = typeof props.src === "string" ? props.src : undefined;
     const alt = typeof props.alt === "string" ? props.alt : "";
