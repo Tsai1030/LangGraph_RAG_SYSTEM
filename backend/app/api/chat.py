@@ -1,25 +1,175 @@
-import json
+"""
+chat.py — SSE 聊天端點
 
-from fastapi import APIRouter, Depends
+流程：
+1. 驗證 conversation 存在且屬於當前使用者
+2. 儲存使用者訊息至 app.db
+3. 設定對話標題（若首則訊息）
+4. 從 app.db 載入既有摘要
+5. 啟動 LangGraph graph.astream_events
+6. 逐 token 推送 SSE text 事件
+7. graph 完成後推送 sources / form / done 事件
+8. 儲存 AI 回覆至 app.db
+"""
+
+from __future__ import annotations
+
+import json
+from typing import AsyncGenerator
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
+from langchain_core.messages import HumanMessage
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_current_user
+from app.database import AsyncSessionLocal, get_db
 from app.models.user import User
 from app.schemas.chat import ChatRequest
+from app.services.conversation_service import (
+    auto_set_title,
+    get_summary,
+    save_message,
+)
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
 
 @router.post("/stream")
 async def chat_stream(
+    request: Request,
     body: ChatRequest,
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
-    # Phase 3 will implement the full LangGraph integration.
-    # This is a placeholder that returns a valid SSE skeleton.
-    async def event_generator():
-        yield f"data: {json.dumps({'type': 'text', 'content': '[Phase 3 not yet implemented]'})}\n\n"
+    """
+    POST /api/chat/stream
+
+    SSE 事件格式：
+      {"type": "text",    "content": "..."}   # 逐 token 串流文字
+      {"type": "sources", "data": [...]}       # 參考來源（一次性）
+      {"type": "form",    "data": {...}}        # 表單 JSON（form_request 時）
+      {"type": "error",   "content": "..."}    # 錯誤訊息
+      {"type": "done"}                          # 串流結束
+    """
+    conversation_id = body.conversation_id
+    user_id = str(current_user.id)
+
+    # ── 1. 驗證對話所有權 ─────────────────────────────────────
+    from app.services.conversation_service import get_conversation
+    try:
+        await get_conversation(db, conversation_id, user_id)
+    except HTTPException:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found",
+        )
+
+    # ── 2. 儲存使用者訊息 ─────────────────────────────────────
+    await save_message(db, conversation_id, "user", body.message)
+
+    # ── 3. 自動設定對話標題（首次訊息） ──────────────────────
+    await auto_set_title(db, conversation_id, body.message)
+
+    # ── 4. 載入既有摘要（app.db → graph state） ───────────────
+    summary_record = await get_summary(db, conversation_id)
+    summary_text = summary_record.summary if summary_record else None
+
+    # ── 5. 取得 graph（由 lifespan 初始化於 app.state） ───────
+    graph = request.app.state.graph
+    config = {"configurable": {"thread_id": conversation_id}}
+
+    initial_state = {
+        "conversation_id": conversation_id,
+        "user_id": user_id,
+        "query": body.message,
+        "messages": [HumanMessage(content=body.message)],  # add_messages 自動 append
+        "retrieved_chunks": [],
+        "context": "",
+        "intent": "",
+        "form_type": None,
+        "response": "",
+        "form_data": None,
+        "sources": [],
+        "is_compact_needed": False,
+        "token_count": 0,
+        "summary": summary_text,
+    }
+
+    # ── 6. SSE 事件生成器 ─────────────────────────────────────
+    async def event_generator() -> AsyncGenerator[str, None]:
+        assistant_response = ""
+        had_error = False
+
+        try:
+            async for event in graph.astream_events(
+                initial_state, config, version="v2"
+            ):
+                event_type = event.get("event", "")
+                node_name = event.get("metadata", {}).get("langgraph_node", "")
+
+                # 捕捉 responder 節點的串流 token
+                if event_type == "on_chat_model_stream" and node_name == "responder":
+                    chunk = event["data"].get("chunk")
+                    if chunk and hasattr(chunk, "content") and chunk.content:
+                        assistant_response += chunk.content
+                        yield (
+                            f"data: {json.dumps({'type': 'text', 'content': chunk.content}, ensure_ascii=False)}\n\n"
+                        )
+
+        except Exception as exc:
+            had_error = True
+            yield (
+                f"data: {json.dumps({'type': 'error', 'content': str(exc)}, ensure_ascii=False)}\n\n"
+            )
+
+        # ── 7. graph 完成後：取最終狀態推送 sources / form ────
+        if not had_error:
+            try:
+                final = await graph.aget_state(config)
+                final_values: dict = final.values if final else {}
+
+                sources = final_values.get("sources", [])
+                if sources:
+                    yield (
+                        f"data: {json.dumps({'type': 'sources', 'data': sources}, ensure_ascii=False)}\n\n"
+                    )
+
+                form_data = final_values.get("form_data")
+                if form_data:
+                    yield (
+                        f"data: {json.dumps({'type': 'form', 'data': form_data}, ensure_ascii=False)}\n\n"
+                    )
+
+            except Exception:
+                pass  # 取狀態失敗不影響已串流的文字
+
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+        # ── 8. 儲存 AI 回覆至 app.db ──────────────────────────
+        if assistant_response:
+            try:
+                # 用獨立 session（原 db session 在 StreamingResponse 結束前仍有效，
+                # 但為避免未來重構問題，用新 session 更安全）
+                async with AsyncSessionLocal() as save_db:
+                    meta: dict = {}
+                    if not had_error:
+                        try:
+                            if final_values.get("sources"):
+                                meta["sources"] = final_values["sources"]
+                            if final_values.get("form_data"):
+                                meta["form_data"] = final_values["form_data"]
+                        except Exception:
+                            pass
+                    await save_message(
+                        save_db,
+                        conversation_id,
+                        "assistant",
+                        assistant_response,
+                        metadata=meta or None,
+                    )
+            except Exception:
+                pass  # 儲存失敗不影響已完成的串流
 
     return StreamingResponse(
         event_generator(),
@@ -27,5 +177,6 @@ async def chat_stream(
         headers={
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
         },
     )
