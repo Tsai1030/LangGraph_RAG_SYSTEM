@@ -12,7 +12,9 @@ export async function streamChat(
 ): Promise<void> {
   const token = getAccessToken();
 
-  const response = await fetch("/api/chat/stream", {
+  // 直連後端，繞過 Next.js rewrites 的 response buffering
+  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
+  const response = await fetch(`${backendUrl}/api/chat/stream`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
