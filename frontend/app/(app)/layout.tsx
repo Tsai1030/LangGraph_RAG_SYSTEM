@@ -11,6 +11,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const accessToken = useAuthStore((s) => s.accessToken);
   const [ready, setReady] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
     const init = async () => {
@@ -41,9 +42,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex h-screen overflow-hidden" style={{ background: "var(--content-bg)" }}>
-      {/* Sidebar — animated width */}
+      {/* Desktop Sidebar — animated width, hidden on mobile */}
       <div
-        className="shrink-0 flex flex-col overflow-hidden"
+        className="hidden md:flex shrink-0 flex-col overflow-hidden"
         style={{
           background: "#09090b",
           width: collapsed ? "56px" : "256px",
@@ -53,8 +54,39 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <Sidebar collapsed={collapsed} onToggle={() => setCollapsed((v) => !v)} />
       </div>
 
+      {/* Mobile Sidebar Overlay */}
+      {mobileOpen && (
+        <div className="md:hidden">
+          {/* Blur backdrop */}
+          <div
+            className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm"
+            onClick={() => setMobileOpen(false)}
+          />
+          {/* Sidebar panel slides in from left */}
+          <div
+            className="fixed left-0 top-0 bottom-0 z-50 flex flex-col overflow-hidden"
+            style={{ width: "256px", background: "#09090b" }}
+          >
+            <Sidebar
+              collapsed={false}
+              onToggle={() => {}}
+              onMobileClose={() => setMobileOpen(false)}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Main Content */}
-      <main className="flex-1 flex flex-col overflow-hidden min-w-0">
+      <main className="flex-1 flex flex-col overflow-hidden min-w-0 relative">
+        {/* Mobile hamburger button — two lines (long + short) */}
+        <button
+          className="md:hidden absolute top-3 left-3 z-30 flex flex-col gap-[5px] p-2 rounded-md text-zinc-500 hover:text-zinc-800 hover:bg-zinc-100 transition-colors"
+          onClick={() => setMobileOpen(true)}
+          aria-label="開啟選單"
+        >
+          <span className="block h-0.5 w-5 bg-current rounded-full" />
+          <span className="block h-0.5 w-3 bg-current rounded-full" />
+        </button>
         {children}
       </main>
     </div>

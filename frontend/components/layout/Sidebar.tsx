@@ -15,6 +15,7 @@ import type { ConversationOut } from "@/types";
 interface Props {
   collapsed: boolean;
   onToggle: () => void;
+  onMobileClose?: () => void;
 }
 
 function timeAgo(iso: string): string {
@@ -61,7 +62,7 @@ function TipBtn({
   );
 }
 
-export default function Sidebar({ collapsed, onToggle }: Props) {
+export default function Sidebar({ collapsed, onToggle, onMobileClose }: Props) {
   const router = useRouter();
   const pathname = usePathname();
   const { conversations, setConversations, addConversation, removeConversation, updateConversationTitle } =
@@ -132,19 +133,29 @@ export default function Sidebar({ collapsed, onToggle }: Props) {
             <span className="text-zinc-100 font-medium text-sm truncate">營造知識助理</span>
           </div>
         )}
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <button
-                onClick={onToggle}
-                className="size-7 flex items-center justify-center rounded-md text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors shrink-0"
-              />
-            }
+        {onMobileClose ? (
+          <button
+            onClick={onMobileClose}
+            className="size-7 flex items-center justify-center rounded-md text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors shrink-0"
+            title="關閉"
           >
-            <PanelLeft size={15} />
-          </TooltipTrigger>
-          <TooltipContent side="right">{collapsed ? "展開" : "收合"}</TooltipContent>
-        </Tooltip>
+            <X size={15} />
+          </button>
+        ) : (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  onClick={onToggle}
+                  className="size-7 flex items-center justify-center rounded-md text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors shrink-0"
+                />
+              }
+            >
+              <PanelLeft size={15} />
+            </TooltipTrigger>
+            <TooltipContent side="right">{collapsed ? "展開" : "收合"}</TooltipContent>
+          </Tooltip>
+        )}
       </div>
 
       <Separator className="bg-zinc-800/60" />

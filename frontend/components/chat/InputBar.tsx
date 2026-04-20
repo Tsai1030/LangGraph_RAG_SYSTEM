@@ -32,14 +32,7 @@ export default function InputBar({ onSend, onStop, isStreaming, disabled }: Prop
   const canSend = value.trim().length > 0 && !isStreaming && !disabled;
 
   return (
-    <div
-      className="px-4 pb-4 pt-3"
-      style={{
-        background: "rgba(255,253,250,0.82)",
-        backdropFilter: "blur(20px)",
-        WebkitBackdropFilter: "blur(20px)",
-      }}
-    >
+    <div className="px-4 pb-4">
       <div className="max-w-2xl mx-auto">
         <div className={cn(
           "flex items-end gap-2 rounded-4xl border bg-white shadow-sm px-4 py-3 transition-shadow",

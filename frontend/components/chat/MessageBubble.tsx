@@ -117,9 +117,9 @@ export default function MessageBubble({
       {lightbox && (
         <Lightbox src={lightbox.src} alt={lightbox.alt} onClose={() => setLightbox(null)} />
       )}
-      <div className="flex gap-3 px-6 animate-fade-up">
-        {/* Avatar */}
-        <div className="shrink-0 size-6 mt-1">
+      <div className="flex gap-3 px-4 md:px-6 animate-fade-up">
+        {/* Avatar — hidden on mobile */}
+        <div className="hidden md:block shrink-0 size-6 mt-1">
           <Image src="/logo.png" alt="AI" width={24} height={24} className="size-6 object-contain" />
         </div>
 
