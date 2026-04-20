@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import { useRouter, usePathname } from "next/navigation";
+import Image from "next/image";
 import { Plus, Trash2, LogOut, Pencil, Check, X, PanelLeft, MessageSquare } from "lucide-react";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { Separator } from "@/components/ui/separator";
@@ -80,12 +81,8 @@ export default function Sidebar({ collapsed, onToggle }: Props) {
 
   const activeId = pathname.match(/\/chat\/([^/]+)/)?.[1] ?? null;
 
-  const handleNew = async () => {
-    try {
-      const { data } = await api.post<ConversationOut>("/conversations", {});
-      addConversation(data);
-      router.push(`/chat/${data.id}`);
-    } catch {}
+  const handleNew = () => {
+    router.push("/new");
   };
 
   const handleDelete = async (e: React.MouseEvent, id: string) => {
@@ -125,9 +122,13 @@ export default function Sidebar({ collapsed, onToggle }: Props) {
       <div className={cn("flex items-center h-14 shrink-0 px-3 gap-2", collapsed && "justify-center")}>
         {!collapsed && (
           <div className="flex-1 flex items-center gap-2.5 min-w-0">
-            <div className="size-6 rounded-md bg-zinc-100 flex items-center justify-center shrink-0">
-              <MessageSquare size={13} className="text-zinc-900" strokeWidth={2.5} />
-            </div>
+            <button
+              onClick={() => router.push("/new")}
+              className="shrink-0 rounded-md overflow-hidden hover:opacity-80 transition-opacity cursor-pointer"
+              title="回到新對話"
+            >
+              <Image src="/logo.png" alt="營造知識助理" width={24} height={24} className="size-6 object-contain" />
+            </button>
             <span className="text-zinc-100 font-medium text-sm truncate">營造知識助理</span>
           </div>
         )}

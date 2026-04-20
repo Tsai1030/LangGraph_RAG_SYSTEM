@@ -11,7 +11,7 @@ import type { MessageOut, FormData as FormDataType, Source, ConversationDetail }
 
 export default function ChatPage() {
   const { conversationId } = useParams<{ conversationId: string }>();
-  const { setCurrentMessages, appendMessage, updateLastAssistantMessage } = useChatStore();
+  const { setCurrentMessages, appendMessage, updateLastAssistantMessage, pendingMessage, setPendingMessage, conversations, updateConversationTitle } = useChatStore();
 
   const [loading, setLoading] = useState(true);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -46,8 +46,22 @@ export default function ChatPage() {
       .finally(() => setLoading(false));
   }, [conversationId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // 消費從 /new 頁帶來的第一則訊息
+  useEffect(() => {
+    if (loading || !pendingMessage) return;
+    const msg = pendingMessage;
+    setPendingMessage(null);
+    handleSend(msg);
+  }, [loading]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleSend = useCallback(async (text: string) => {
     if (isStreaming) return;
+
+    // 若對話尚無標題，樂觀更新 sidebar（與後端 auto_set_title 邏輯一致：前 30 字）
+    const conv = conversations.find((c) => c.id === conversationId);
+    if (conv && !conv.title) {
+      updateConversationTitle(conversationId, text.slice(0, 30));
+    }
 
     // Optimistic user message
     const userMsg: MessageOut = {

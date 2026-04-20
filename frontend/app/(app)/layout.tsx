@@ -20,6 +20,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           router.replace("/login");
           return;
         }
+        // 從 cookie 還原 session（頁面重整或首次進入）→ 固定從歡迎頁開始
+        router.replace("/new");
       }
       setReady(true);
     };

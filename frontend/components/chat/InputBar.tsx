@@ -42,7 +42,7 @@ export default function InputBar({ onSend, onStop, isStreaming, disabled }: Prop
     >
       <div className="max-w-2xl mx-auto">
         <div className={cn(
-          "flex items-end gap-2 rounded-2xl border bg-white shadow-sm px-4 py-3 transition-shadow",
+          "flex items-end gap-2 rounded-4xl border bg-white shadow-sm px-4 py-3 transition-shadow",
           disabled ? "border-zinc-200 opacity-60" : "border-zinc-200 hover:border-zinc-300 focus-within:border-zinc-400 focus-within:shadow-md"
         )}>
           <textarea

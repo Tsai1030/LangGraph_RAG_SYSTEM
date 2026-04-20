@@ -12,6 +12,10 @@ interface ChatState {
   setCurrentMessages: (msgs: MessageOut[]) => void;
   appendMessage: (msg: MessageOut) => void;
   updateLastAssistantMessage: (content: string) => void;
+
+  // 從 /new 頁跳轉至 /chat 時，帶入第一則待送訊息
+  pendingMessage: string | null;
+  setPendingMessage: (msg: string | null) => void;
 }
 
 export const useChatStore = create<ChatState>((set) => ({
@@ -41,4 +45,7 @@ export const useChatStore = create<ChatState>((set) => ({
       }
       return { currentMessages: msgs };
     }),
+
+  pendingMessage: null,
+  setPendingMessage: (msg) => set({ pendingMessage: msg }),
 }));

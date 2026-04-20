@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import Image from "next/image";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Components } from "react-markdown";
@@ -118,8 +119,8 @@ export default function MessageBubble({
       )}
       <div className="flex gap-3 px-6 animate-fade-up">
         {/* Avatar */}
-        <div className="shrink-0 size-6 rounded-full bg-zinc-900 border border-zinc-200 flex items-center justify-center mt-1">
-          <span className="text-[9px] font-bold text-zinc-100 tracking-tight">AI</span>
+        <div className="shrink-0 size-6 mt-1">
+          <Image src="/logo.png" alt="AI" width={24} height={24} className="size-6 object-contain" />
         </div>
 
         <div className="flex-1 min-w-0 pb-1">
