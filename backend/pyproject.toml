@@ -21,4 +21,5 @@ dependencies = [
     "langchain-openai>=0.3.0",
     "tiktoken>=0.12.0",
     "uvicorn[standard]>=0.44.0",
+    "rank-bm25>=0.2.2",
 ]

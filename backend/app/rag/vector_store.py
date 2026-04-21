@@ -101,15 +101,32 @@ async def search(
     # ChromaDB 為同步 API，用 asyncio.to_thread 包裝避免阻塞 event loop
     results = await asyncio.to_thread(collection.query, **kwargs)
 
+    ids = results["ids"][0]
     docs = results["documents"][0]
     metas = results["metadatas"][0]
     dists = results["distances"][0]
 
     return [
         {
+            "id": id_,
             "document": doc,
             "metadata": meta,
             "distance": round(dist, 4),
         }
-        for doc, meta, dist in zip(docs, metas, dists)
+        for id_, doc, meta, dist in zip(ids, docs, metas, dists)
+    ]
+
+
+async def get_all_documents() -> list[dict[str, Any]]:
+    """載入所有 chunks，用於建立 BM25 索引。"""
+    collection = _get_collection()
+    results = await asyncio.to_thread(
+        collection.get,
+        include=["documents", "metadatas"],
+    )
+    return [
+        {"id": id_, "document": doc, "metadata": meta}
+        for id_, doc, meta in zip(
+            results["ids"], results["documents"], results["metadatas"]
+        )
     ]
