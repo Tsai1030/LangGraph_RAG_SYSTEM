@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Image from "next/image";
-import { Plus, Trash2, LogOut, Pencil, Check, X, PanelLeft, MessageSquare } from "lucide-react";
+import { Plus, Trash2, LogOut, Pencil, Check, X, PanelLeft, MessageSquare, MoreHorizontal } from "lucide-react";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
@@ -19,7 +19,9 @@ interface Props {
 }
 
 function timeAgo(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
+  // SQLite 回傳的 datetime 不帶 timezone，補 Z 確保 JS 以 UTC 解析
+  const normalized = /[Zz+]/.test(iso) ? iso : iso + "Z";
+  const diff = Date.now() - new Date(normalized).getTime();
   const m = Math.floor(diff / 60000);
   if (m < 1) return "剛剛";
   if (m < 60) return `${m} 分鐘前`;
@@ -71,6 +73,8 @@ export default function Sidebar({ collapsed, onToggle, onMobileClose }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const editRef = useRef<HTMLInputElement>(null);
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
 
   useEffect(() => {
     api.get<ConversationOut[]>("/conversations").then(({ data }) => setConversations(data)).catch(() => {});
@@ -86,13 +90,24 @@ export default function Sidebar({ collapsed, onToggle, onMobileClose }: Props) {
     router.push("/new");
   };
 
-  const handleDelete = async (e: React.MouseEvent, id: string) => {
+  const handleDeleteRequest = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
+    setConfirmingId(id);
+  };
+
+  const handleDeleteConfirm = async (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    setConfirmingId(null);
     try {
       await api.delete(`/conversations/${id}`);
       removeConversation(id);
       if (activeId === id) router.push("/new");
     } catch {}
+  };
+
+  const handleDeleteCancel = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setConfirmingId(null);
   };
 
   const startEdit = (e: React.MouseEvent, conv: ConversationOut) => {
@@ -218,16 +233,59 @@ export default function Sidebar({ collapsed, onToggle, onMobileClose }: Props) {
               );
             }
 
+            const isConfirming = confirmingId === conv.id;
+            const isMenuOpen = menuOpenId === conv.id;
+
             return (
               <div
                 key={conv.id}
-                onClick={() => !isEditing && router.push(`/chat/${conv.id}`)}
+                onClick={() => !isEditing && !isConfirming && !isMenuOpen && router.push(`/chat/${conv.id}`)}
                 className={cn(
                   "group relative flex flex-col px-2.5 py-2 rounded-md cursor-pointer transition-colors",
                   isActive ? "bg-zinc-800 text-zinc-100" : "hover:bg-zinc-800/60 text-zinc-400 hover:text-zinc-200"
                 )}
               >
-                {isEditing ? (
+                {isMenuOpen ? (
+                  /* 手機版：inline 選單列，取代 absolute dropdown 避免穿透與遮罩問題 */
+                  <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      onClick={(e) => { setMenuOpenId(null); startEdit(e, conv); }}
+                      className="flex-1 flex items-center justify-center gap-1.5 py-1 rounded-md text-xs text-zinc-300 bg-zinc-700 active:bg-zinc-600 transition-colors"
+                    >
+                      <Pencil size={11} />
+                      重新命名
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setMenuOpenId(null); handleDeleteRequest(e, conv.id); }}
+                      className="flex-1 flex items-center justify-center gap-1.5 py-1 rounded-md text-xs text-red-400 bg-red-500/10 active:bg-red-500/20 transition-colors"
+                    >
+                      <Trash2 size={11} />
+                      刪除
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setMenuOpenId(null); }}
+                      className="shrink-0 size-6 flex items-center justify-center rounded-md text-zinc-500 active:bg-zinc-700 transition-colors"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                ) : isConfirming ? (
+                  <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                    <span className="flex-1 text-xs text-zinc-300 truncate">確定刪除？</span>
+                    <button
+                      onClick={(e) => handleDeleteConfirm(e, conv.id)}
+                      className="text-[11px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors shrink-0"
+                    >
+                      刪除
+                    </button>
+                    <button
+                      onClick={handleDeleteCancel}
+                      className="text-[11px] px-1.5 py-0.5 rounded bg-zinc-700 text-zinc-400 hover:bg-zinc-600 transition-colors shrink-0"
+                    >
+                      取消
+                    </button>
+                  </div>
+                ) : isEditing ? (
                   <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                     <input
                       ref={editRef}
@@ -254,13 +312,24 @@ export default function Sidebar({ collapsed, onToggle, onMobileClose }: Props) {
                     <span className="text-[10px] text-zinc-600 mt-0.5">
                       {timeAgo(conv.updated_at)}
                     </span>
-                    <div className="absolute right-1.5 top-1/2 -translate-y-1/2 hidden group-hover:flex items-center gap-0.5">
+                    {/* 電腦版：hover 顯示操作按鈕 */}
+                    <div className="hidden md:group-hover:flex absolute right-1.5 top-1/2 -translate-y-1/2 items-center gap-0.5">
                       <TipBtn onClick={(e) => startEdit(e, conv)} title="重新命名" className="size-6">
                         <Pencil size={11} />
                       </TipBtn>
-                      <TipBtn onClick={(e) => handleDelete(e, conv.id)} title="刪除" danger className="size-6">
+                      <TipBtn onClick={(e) => handleDeleteRequest(e, conv.id)} title="刪除" danger className="size-6">
                         <Trash2 size={11} />
                       </TipBtn>
+                    </div>
+
+                    {/* 手機版：常駐三點按鈕（inline 展開，無 absolute dropdown 避免穿透） */}
+                    <div className="flex md:hidden absolute right-1.5 top-1/2 -translate-y-1/2 items-center">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setMenuOpenId(menuOpenId === conv.id ? null : conv.id); }}
+                        className="size-6 flex items-center justify-center rounded-md text-zinc-500 active:bg-zinc-700 transition-colors"
+                      >
+                        <MoreHorizontal size={13} />
+                      </button>
                     </div>
                   </>
                 )}
