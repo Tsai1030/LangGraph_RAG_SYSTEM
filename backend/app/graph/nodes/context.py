@@ -34,13 +34,19 @@ def context_builder(state: GraphState) -> dict:
         if header_parts:
             text = " ".join(header_parts) + "\n" + text
 
-        # 若有圖片標籤，附加說明（提示 LLM 此處有相關圖示）
+        # 若有圖片路徑，直接附加 Markdown 圖片語法讓 LLM 可直接引用
         if meta.get("has_images"):
-            tags = meta.get("image_tags", [])
-            if isinstance(tags, list) and tags:
-                tag_str = ", ".join(str(t) for t in tags if t)
-                if tag_str:
-                    text += f"\n[相關圖示：{tag_str}]"
+            image_paths = meta.get("image_paths", [])
+            image_tags = meta.get("image_tags", [])
+            if isinstance(image_paths, list) and image_paths:
+                img_lines: list[str] = []
+                for i, path in enumerate(image_paths[:3]):  # 最多附加 3 張避免過長
+                    if not path:
+                        continue
+                    alt = image_tags[i] if isinstance(image_tags, list) and i < len(image_tags) else "相關圖片"
+                    img_lines.append(f"![{alt}]({path})")
+                if img_lines:
+                    text += "\n" + "\n".join(img_lines)
 
         context_parts.append(text)
 
