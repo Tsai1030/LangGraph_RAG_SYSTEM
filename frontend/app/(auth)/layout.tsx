@@ -10,6 +10,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
           src="/login_img.jpg"
           alt=""
           fill
+          sizes="50vw"
           className="object-cover"
           priority
         />

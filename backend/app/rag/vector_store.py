@@ -11,6 +11,7 @@ vector_store.py — ChromaDB 連線與向量搜尋介面
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from typing import Any
 
 import chromadb
@@ -27,12 +28,25 @@ _collection = None
 _openai_client: AsyncOpenAI | None = None
 
 
+def _resolve_chroma_path() -> str:
+    """
+    若設定了 chroma_active_version（如 "v1"），
+    回傳 chroma_versions/v1/ 路徑；否則回傳傳統 chroma_persist_path。
+    """
+    if settings.chroma_active_version:
+        return str(
+            Path(settings.chroma_versions_path) / settings.chroma_active_version
+        )
+    return settings.chroma_persist_path
+
+
 def _get_collection():
     """取得 ChromaDB collection（lazy singleton）"""
     global _chroma_client, _collection
     if _collection is None:
+        chroma_path = _resolve_chroma_path()
         _chroma_client = chromadb.PersistentClient(
-            path=settings.chroma_persist_path,
+            path=chroma_path,
             settings=ChromaSettings(anonymized_telemetry=False),
         )
         _collection = _chroma_client.get_collection(COLLECTION_NAME)

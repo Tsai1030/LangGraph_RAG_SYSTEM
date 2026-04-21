@@ -30,6 +30,8 @@ class Settings(BaseSettings):
 
     # ChromaDB
     chroma_persist_path: str = "./chroma_db"
+    chroma_versions_path: str = "./chroma_versions"  # 版本化 ChromaDB 的根目錄
+    chroma_active_version: str = ""  # 留空 = 使用 chroma_persist_path；設為 "v1" 等使用版本化路徑
 
     # App
     app_env: str = "development"
