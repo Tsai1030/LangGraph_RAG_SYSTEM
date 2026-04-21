@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
 import type { MessageOut, FormData as FormDataType, Source } from "@/types";
 import MessageBubble from "./MessageBubble";
 
@@ -19,6 +20,8 @@ interface Props {
   streamingSources: Source[];
   onSuggestedQuery: (q: string) => void;
   loading?: boolean;
+  onAtBottomChange?: (atBottom: boolean) => void;
+  scrollToBottomRef?: React.RefObject<(() => void) | null>;
 }
 
 function WelcomeScreen({ onQuery }: { onQuery: (q: string) => void }) {
@@ -66,32 +69,80 @@ function LoadingSkeleton() {
 export default function MessageList({
   messages, streamingMessage, streamingFormData,
   streamingSources, onSuggestedQuery, loading = false,
+  onAtBottomChange, scrollToBottomRef,
 }: Props) {
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [atBottom, setAtBottom] = useState(true);
 
+  // 檢查滾動容器是否已到底部
+  const checkAtBottom = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) { setAtBottom(true); return; }
+    setAtBottom(el.scrollTop + el.clientHeight >= el.scrollHeight - 60);
+  }, []);
+
+  // 監聽滾動事件
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, streamingMessage?.content]);
+    const el = scrollRef.current;
+    if (!el) return;
+    el.addEventListener("scroll", checkAtBottom, { passive: true });
+    checkAtBottom();
+    return () => el.removeEventListener("scroll", checkAtBottom);
+  }, [checkAtBottom, loading]);
 
-  if (loading) return <LoadingSkeleton />;
-  if (!messages.length && !streamingMessage) return <WelcomeScreen onQuery={onSuggestedQuery} />;
+  // 串流時內容增加 → 更新底部狀態
+  useEffect(() => {
+    checkAtBottom();
+  }, [streamingMessage?.content, checkAtBottom]);
+
+  // 進入聊天室載入完成 → 自動滾到最底（不含串流）
+  useEffect(() => {
+    if (!loading && messages.length > 0) {
+      const el = scrollRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
+    }
+  }, [loading]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 通知 parent atBottom 狀態變化
+  useEffect(() => {
+    onAtBottomChange?.(atBottom);
+  }, [atBottom, onAtBottomChange]);
+
+  // 暴露 scrollToBottom 給 parent 呼叫
+  useEffect(() => {
+    if (!scrollToBottomRef) return;
+    scrollToBottomRef.current = () => {
+      requestAnimationFrame(() => {
+        const el = scrollRef.current;
+        if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+      });
+    };
+  }, [scrollToBottomRef]);
 
   return (
-    <div className="flex-1 overflow-y-auto">
-      <div className="max-w-2xl mx-auto py-8 flex flex-col gap-6">
-        {messages.map((msg) => (
-          <MessageBubble key={msg.id} message={msg} />
-        ))}
-        {streamingMessage && (
-          <MessageBubble
-            message={streamingMessage}
-            isStreaming
-            streamingFormData={streamingFormData}
-            streamingSources={streamingSources}
-          />
+    <>
+
+      <div ref={scrollRef} className="flex-1 overflow-y-auto">
+        {loading ? (
+          <LoadingSkeleton />
+        ) : !messages.length && !streamingMessage ? (
+          <WelcomeScreen onQuery={onSuggestedQuery} />
+        ) : (
+          <div className={cn("max-w-3xl mx-auto pt-8 flex flex-col gap-6", streamingMessage ? "pb-40" : "pb-8")}>
+            {messages.map((msg) => (
+              <MessageBubble key={msg.id} message={msg} />
+            ))}
+            {streamingMessage && (
+              <MessageBubble
+                message={streamingMessage}
+                isStreaming
+                streamingFormData={streamingFormData}
+                streamingSources={streamingSources}
+              />
+            )}
+          </div>
         )}
-        <div ref={bottomRef} />
       </div>
-    </div>
+    </>
   );
 }

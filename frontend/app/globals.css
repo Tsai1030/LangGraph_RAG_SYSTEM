@@ -138,7 +138,7 @@ body {
 }
 
 /* Prose — assistant messages */
-.prose-chat { line-height: 1.75; color: #18181b; font-size: 0.9rem; }
+.prose-chat { line-height: 1.75; color: #18181b; font-size: 1rem; }
 
 .prose-chat h1, .prose-chat h2, .prose-chat h3, .prose-chat h4 {
   font-weight: 600; color: #09090b; margin: 1.1em 0 0.4em;

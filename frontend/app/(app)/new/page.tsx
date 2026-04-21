@@ -63,7 +63,7 @@ export default function NewPage() {
         disabled={creating}
         placeholder={placeholder}
         rows={1}
-        className="flex-1 text-sm text-zinc-800 placeholder-zinc-400 bg-transparent outline-none resize-none leading-relaxed disabled:cursor-not-allowed"
+        className="flex-1 text-base text-zinc-800 placeholder-zinc-400 bg-transparent outline-none resize-none leading-relaxed disabled:cursor-not-allowed"
         style={{ maxHeight: "180px", overflowY: "auto" }}
       />
       <button
@@ -86,11 +86,11 @@ export default function NewPage() {
       <div className="hidden md:flex flex-col h-full items-center bg-background px-4 select-none overflow-y-auto">
         <div className="w-full max-w-2xl flex flex-col gap-4 pt-[28vh]">
           <div className="text-center mb-1">
-            <h2 className="text-xl font-semibold text-zinc-800">有什麼可以幫您？</h2>
-            <p className="text-sm text-zinc-400 mt-1">查詢工地作業規範，或生成結構化作業表單</p>
+            <h2 className="text-2xl font-semibold text-zinc-800">有什麼可以幫您？</h2>
+            <p className="text-base text-zinc-400 mt-1">查詢工地作業規範，或生成結構化作業表單</p>
           </div>
           {inputBox("輸入問題，例如：動員開工需要哪些初期計畫？")}
-          <p className="text-center text-[11px] text-zinc-400 -mt-2 select-none">
+          <p className="text-center text-xs text-zinc-400 -mt-2 select-none">
             AI 有時會犯錯，需要二次查驗
           </p>
           <div className="flex gap-2">
@@ -99,7 +99,7 @@ export default function NewPage() {
                 key={q}
                 onClick={() => handleSend(q)}
                 disabled={creating}
-                className="flex-1 px-3 py-3 rounded-2xl border border-zinc-200 bg-white text-xs text-zinc-600 hover:text-zinc-900 hover:border-zinc-300 hover:shadow-sm transition-all text-center disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex-1 px-3 py-3 rounded-2xl border border-zinc-200 bg-white text-sm text-zinc-600 hover:text-zinc-900 hover:border-zinc-300 hover:shadow-sm transition-all text-center disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {q}
               </button>
@@ -112,8 +112,8 @@ export default function NewPage() {
       <div className="md:hidden flex flex-col h-full bg-background select-none">
         {/* Title — centered in remaining space, with top padding for hamburger */}
         <div className="flex-1 flex flex-col items-center justify-center px-6 pt-12">
-          <h2 className="text-xl font-semibold text-zinc-800">有什麼可以幫您？</h2>
-          <p className="text-sm text-zinc-400 mt-1 text-center">查詢工地作業規範，或生成結構化作業表單</p>
+          <h2 className="text-2xl font-semibold text-zinc-800">有什麼可以幫您？</h2>
+          <p className="text-base text-zinc-400 mt-1 text-center">查詢工地作業規範，或生成結構化作業表單</p>
         </div>
 
         {/* Bottom: 2 suggestion cards + input + disclaimer */}

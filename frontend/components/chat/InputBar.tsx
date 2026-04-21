@@ -13,7 +13,15 @@ interface Props {
 
 export default function InputBar({ onSend, onStop, isStreaming, disabled }: Props) {
   const [value, setValue] = useState("");
+  const [isMobile, setIsMobile] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
 
   useEffect(() => {
     const el = ref.current;
@@ -33,7 +41,7 @@ export default function InputBar({ onSend, onStop, isStreaming, disabled }: Prop
 
   return (
     <div className="px-4 pb-4">
-      <div className="max-w-2xl mx-auto">
+      <div className="max-w-3xl mx-auto">
         <div className={cn(
           "flex items-end gap-2 rounded-4xl border bg-white shadow-sm px-4 py-3 transition-shadow",
           disabled ? "border-zinc-200 opacity-60" : "border-zinc-200 hover:border-zinc-300 focus-within:border-zinc-400 focus-within:shadow-md"
@@ -46,9 +54,9 @@ export default function InputBar({ onSend, onStop, isStreaming, disabled }: Prop
               if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
             }}
             disabled={disabled}
-            placeholder={isStreaming ? "回覆中…" : "輸入問題，例如：動員開工需要哪些初期計畫？"}
+            placeholder={isStreaming ? "回覆中…" : isMobile ? "想問就問" : "輸入問題，例如：動員開工需要哪些初期計畫？"}
             rows={1}
-            className="flex-1 text-sm text-zinc-800 placeholder-zinc-400 bg-transparent outline-none resize-none leading-relaxed disabled:cursor-not-allowed"
+            className="flex-1 text-base text-zinc-800 placeholder-zinc-400 bg-transparent outline-none resize-none leading-relaxed disabled:cursor-not-allowed"
             style={{ maxHeight: "180px", overflowY: "auto" }}
           />
 

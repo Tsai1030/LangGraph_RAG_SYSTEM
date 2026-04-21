@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
+import { ArrowDown } from "lucide-react";
 import api from "@/lib/api";
 import { streamChat } from "@/lib/sse";
 import { useChatStore } from "@/store/chatStore";
@@ -11,13 +12,18 @@ import type { MessageOut, FormData as FormDataType, Source, ConversationDetail }
 
 export default function ChatPage() {
   const { conversationId } = useParams<{ conversationId: string }>();
-  const { setCurrentMessages, appendMessage, updateLastAssistantMessage, pendingMessage, setPendingMessage, conversations, updateConversationTitle } = useChatStore();
+  const { setCurrentMessages, appendMessage, pendingMessage, setPendingMessage, conversations, updateConversationTitle } = useChatStore();
 
   const [loading, setLoading] = useState(true);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingMessage, setStreamingMessage] = useState<MessageOut | null>(null);
   const [streamingFormData, setStreamingFormData] = useState<FormDataType | null>(null);
   const [streamingSources, setStreamingSources] = useState<Source[]>([]);
+  const [isAtBottom, setIsAtBottom] = useState(true);
+  const scrollToBottomRef = useRef<(() => void) | null>(null);
+
+  const showDots = !isAtBottom && isStreaming;
+  const showArrow = !isAtBottom && !isStreaming;
 
   const abortRef = useRef<AbortController | null>(null);
   const messages = useChatStore((s) => s.currentMessages);
@@ -72,6 +78,7 @@ export default function ChatPage() {
       created_at: new Date().toISOString(),
     };
     appendMessage(userMsg);
+    scrollToBottomRef.current?.();
 
     // Streaming assistant placeholder
     const assistantId = crypto.randomUUID();
@@ -146,7 +153,7 @@ export default function ChatPage() {
   };
 
   return (
-    <div className="flex flex-col h-full bg-background">
+    <div className="relative flex flex-col h-full bg-background">
       <MessageList
         messages={messages}
         streamingMessage={streamingMessage}
@@ -154,7 +161,36 @@ export default function ChatPage() {
         streamingSources={streamingSources}
         onSuggestedQuery={handleSend}
         loading={loading}
+        onAtBottomChange={setIsAtBottom}
+        scrollToBottomRef={scrollToBottomRef}
       />
+
+      {/* 串流中：三點動畫，可點擊 scroll 到底 */}
+      {showDots && (
+        <div className="absolute bottom-[124px] left-1/2 -translate-x-1/2 z-20">
+          <button
+            onClick={() => scrollToBottomRef.current?.()}
+            className="flex items-center gap-[4px] px-2 py-3 rounded-2xl bg-white border border-zinc-200 shadow-md cursor-pointer"
+          >
+            <span className="size-[4px] rounded-full bg-zinc-600" style={{ animation: "pulseDot 1.4s ease-in-out 0ms infinite" }} />
+            <span className="size-[4px] rounded-full bg-zinc-600" style={{ animation: "pulseDot 1.4s ease-in-out 160ms infinite" }} />
+            <span className="size-[4px] rounded-full bg-zinc-600" style={{ animation: "pulseDot 1.4s ease-in-out 320ms infinite" }} />
+          </button>
+        </div>
+      )}
+
+      {/* 串流結束但未在底部：向下箭頭，可點擊 scroll 到底 */}
+      {showArrow && (
+        <div className="absolute bottom-[124px] left-1/2 -translate-x-1/2 z-20">
+          <button
+            onClick={() => scrollToBottomRef.current?.()}
+            className="flex items-center justify-center size-8 rounded-full bg-white border border-zinc-200 shadow-md cursor-pointer hover:bg-zinc-50 transition-colors"
+          >
+            <ArrowDown size={14} className="text-zinc-600" />
+          </button>
+        </div>
+      )}
+
       <InputBar
         onSend={handleSend}
         onStop={handleStop}

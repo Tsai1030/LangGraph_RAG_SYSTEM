@@ -306,10 +306,10 @@ export default function Sidebar({ collapsed, onToggle, onMobileClose }: Props) {
                   </div>
                 ) : (
                   <>
-                    <span className="text-xs font-medium truncate pr-12 leading-snug">
+                    <span className="text-[13px] font-medium truncate pr-12 leading-snug">
                       {conv.title ?? "新對話"}
                     </span>
-                    <span className="text-[10px] text-zinc-600 mt-0.5">
+                    <span className="text-xs text-zinc-600 mt-0.5">
                       {timeAgo(conv.updated_at)}
                     </span>
                     {/* 電腦版：hover 顯示操作按鈕 */}
