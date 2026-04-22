@@ -6,10 +6,17 @@ from __future__ import annotations
 
 import asyncio
 import re
+from pathlib import Path
 
+import jieba
 from rank_bm25 import BM25Okapi
 
 from app.rag.vector_store import get_all_documents, search
+
+# 載入營造領域自訂詞典（啟動時執行一次）
+_DICT_PATH = Path(__file__).parent / "jieba_dict.txt"
+if _DICT_PATH.exists():
+    jieba.load_userdict(str(_DICT_PATH))
 
 # BM25 lazy singleton
 _bm25: BM25Okapi | None = None
@@ -18,8 +25,9 @@ _lock = asyncio.Lock()
 
 
 def _tokenize(text: str) -> list[str]:
-    """中英文混合 tokenizer：中文拆單字、英數字保留詞。"""
-    return re.findall(r"[\u4e00-\u9fff]|[a-zA-Z0-9]+", text.lower())
+    """jieba 分詞（含自訂詞典）+ 英數字保留詞。"""
+    words = jieba.cut(text.lower(), cut_all=False)
+    return [w for w in words if re.search(r"[\u4e00-\u9fff]|[a-zA-Z0-9]", w)]
 
 
 async def _ensure_bm25() -> None:
