@@ -97,6 +97,8 @@ export default function ChatPage() {
     abortRef.current = controller;
 
     let accumulated = "";
+    let latestSources: Source[] = [];
+    let latestFormData: FormDataType | null = null;
 
     try {
       await streamChat(
@@ -108,15 +110,15 @@ export default function ChatPage() {
             prev ? { ...prev, content: accumulated } : null
           );
         },
-        (formData) => setStreamingFormData(formData),
-        (sources) => setStreamingSources(sources),
+        (formData) => { latestFormData = formData; setStreamingFormData(formData); },
+        (sources) => { latestSources = sources; setStreamingSources(sources); },
         () => {
           // on done
           const finalMsg: MessageOut = {
             id: assistantId,
             role: "assistant",
             content: accumulated,
-            meta: { sources: streamingSources, form_data: streamingFormData ?? undefined },
+            meta: { sources: latestSources, form_data: latestFormData ?? undefined },
             created_at: new Date().toISOString(),
           };
           appendMessage(finalMsg);
