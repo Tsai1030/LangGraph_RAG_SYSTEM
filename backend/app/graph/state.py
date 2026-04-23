@@ -44,6 +44,9 @@ class GraphState(TypedDict):
     token_count: int
     summary: Optional[str]         # 壓縮後的對話摘要
 
+    # ── 檢索路由 ──────────────────────────────────────────────
+    need_retrieval: bool             # True = 進行檢索；False = 跳過，直接回答
+
     # ── CRAG 閉環控制 ─────────────────────────────────────────
     retrieval_grade: str            # 'sufficient' | 'insufficient'
     retry_count: int                # 已重試次數（上限 2）

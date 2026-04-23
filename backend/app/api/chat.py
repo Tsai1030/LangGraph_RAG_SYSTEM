@@ -94,6 +94,7 @@ async def chat_stream(
         "is_compact_needed": False,
         "token_count": 0,
         "summary": summary_text,
+        "need_retrieval": True,
     }
 
     # ── 6. SSE 事件生成器 ─────────────────────────────────────
