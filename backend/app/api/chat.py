@@ -100,7 +100,7 @@ async def chat_stream(
     async def event_generator() -> AsyncGenerator[str, None]:
         assistant_response = ""
         had_error = False
-        form_data_sent = False  # 避免 form 事件重複推送
+        final_values: dict = {}  # 提前初始化，避免後續 NameError
 
         try:
             async for event in graph.astream_events(
@@ -115,17 +115,6 @@ async def chat_stream(
                     yield (
                         f"data: {json.dumps({'type': 'form_loading'})}\n\n"
                     )
-
-                # form_structurer 完成 → 立即推送表單（在 responder 文字之前）
-                if event_type == "on_chain_end" and event_name == "form_structurer":
-                    output = event.get("data", {}).get("output") or {}
-                    if isinstance(output, dict):
-                        form_data = output.get("form_data")
-                        if form_data:
-                            form_data_sent = True
-                            yield (
-                                f"data: {json.dumps({'type': 'form', 'data': form_data}, ensure_ascii=False)}\n\n"
-                            )
 
                 # 捕捉 responder 節點的串流 token
                 if event_type == "on_chat_model_stream" and node_name == "responder":
@@ -142,46 +131,37 @@ async def chat_stream(
                 f"data: {json.dumps({'type': 'error', 'content': str(exc)}, ensure_ascii=False)}\n\n"
             )
 
-        # ── 7. graph 完成後：取最終狀態推送 sources；form 若已推送則跳過 ────
+        # ── 7. graph 完成後：讀取最終狀態，推送 sources / form ────
         if not had_error:
             try:
                 final = await graph.aget_state(config)
-                final_values: dict = final.values if final else {}
-
-                sources = final_values.get("sources", [])
-                if sources:
-                    yield (
-                        f"data: {json.dumps({'type': 'sources', 'data': sources}, ensure_ascii=False)}\n\n"
-                    )
-
-                # 僅在串流期間未推送時才補送（備援）
-                if not form_data_sent:
-                    form_data = final_values.get("form_data")
-                    if form_data:
-                        yield (
-                            f"data: {json.dumps({'type': 'form', 'data': form_data}, ensure_ascii=False)}\n\n"
-                        )
-
+                final_values = final.values if final else {}
             except Exception:
-                pass  # 取狀態失敗不影響已串流的文字
+                pass  # 讀取失敗保留空 dict，不影響已串流文字
+
+            sources = final_values.get("sources", [])
+            if sources:
+                yield (
+                    f"data: {json.dumps({'type': 'sources', 'data': sources}, ensure_ascii=False)}\n\n"
+                )
+
+            form_data = final_values.get("form_data")
+            if form_data:
+                yield (
+                    f"data: {json.dumps({'type': 'form', 'data': form_data}, ensure_ascii=False)}\n\n"
+                )
 
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
         # ── 8. 儲存 AI 回覆至 app.db ──────────────────────────
         if assistant_response:
             try:
-                # 用獨立 session（原 db session 在 StreamingResponse 結束前仍有效，
-                # 但為避免未來重構問題，用新 session 更安全）
                 async with AsyncSessionLocal() as save_db:
                     meta: dict = {}
-                    if not had_error:
-                        try:
-                            if final_values.get("sources"):
-                                meta["sources"] = final_values["sources"]
-                            if final_values.get("form_data"):
-                                meta["form_data"] = final_values["form_data"]
-                        except Exception:
-                            pass
+                    if final_values.get("sources"):
+                        meta["sources"] = final_values["sources"]
+                    if final_values.get("form_data"):
+                        meta["form_data"] = final_values["form_data"]
                     await save_message(
                         save_db,
                         conversation_id,

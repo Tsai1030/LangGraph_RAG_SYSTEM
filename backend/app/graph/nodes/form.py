@@ -1,104 +1,93 @@
 """
 form.py — 表單結構化節點
 
-根據 context 與 query，呼叫 LLM 輸出嚴格 JSON 格式的結構化表單。
-form_structurer 在 responder 之前執行，讓 responder 可在文字中提及表單內容。
+使用 OpenAI Function Calling（with_structured_output）生成結構化表單。
+
+rows 設計為 list[str]（每列用 | 分隔各欄位值），避免 list[dict[str,str]] 在
+Function Calling JSON schema 中產生 additionalProperties，導致模型略過此欄位。
+Python 側再將字串列轉換為 list[dict[str, str]] 供前端使用。
 """
 
 from __future__ import annotations
 
-import json
-import re
+from typing import Literal, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
+from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.graph.state import GraphState
 
+_FORM_CONTEXT_LIMIT = 3000
+
 _FORM_SYSTEM_PROMPT = """\
 你是一位專業的營造業文件專家。
-根據使用者需求與參考文件，輸出一個結構化 JSON 表單。
+根據使用者需求與參考文件，生成一份結構化表單。
 
-輸出規則：
-1. 只輸出 JSON，不要加任何說明文字或 markdown 格式（不要用 ```json）
-2. 嚴格遵守以下格式
+form_type 選用原則：
+- checklist：作業檢核表（最常見，逐項勾核用途）
+- report：報告書（填寫數據、記錄結果）
+- plan：計畫書（規劃步驟、時程安排）
+- table：一般資料表格（彙整資訊）
 
-{
-  "form_type": "checklist",
-  "title": "表單標題",
-  "subtitle": "副標題（可省略，省略時不要輸出此欄位）",
-  "columns": ["欄位1", "欄位2", "欄位3"],
-  "rows": [
-    {"欄位1": "內容", "欄位2": "內容", "欄位3": "內容"},
-    ...
-  ],
-  "notes": "備註（可省略，省略時不要輸出此欄位）"
-}
-
-form_type 選項：
-- checklist：作業檢核表（最常見）
-- report：報告書
-- plan：計畫書
-- table：一般資料表格"""
+rows 格式說明：
+- 每列為一個字串，各欄位值依 columns 順序以 | 分隔
+- 例如 columns=["項目", "說明", "狀態"]，則某列為 "安全帽佩戴|施工中必須佩戴|□"
+- 每列的欄位數量必須與 columns 數量相同"""
 
 
-def _parse_form_json(content: str) -> dict | None:
-    """從 LLM 輸出中解析 JSON，支援多種格式"""
-    content = content.strip()
+class FormSchema(BaseModel):
+    form_type: Literal["checklist", "report", "plan", "table"] = Field(
+        description="表單類型"
+    )
+    title: str = Field(description="表單標題")
+    subtitle: Optional[str] = Field(default=None, description="副標題（可選）")
+    columns: list[str] = Field(description="欄位名稱列表，至少 2 個欄位")
+    rows: list[str] = Field(
+        description='資料列，每列為各欄位值依 columns 順序以 | 分隔的字串。欄位數須與 columns 相同。例：["安全帽佩戴|施工中必須佩戴|□", "手套佩戴|高溫作業必須佩戴|□"]'
+    )
+    notes: Optional[str] = Field(default=None, description="備註（可選）")
 
-    # 方法 1：直接解析（LLM 遵守純 JSON 輸出）
-    try:
-        data = json.loads(content)
-        if isinstance(data, dict):
-            return data
-    except json.JSONDecodeError:
-        pass
 
-    # 方法 2：從 markdown code block 提取
-    match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", content, re.DOTALL)
-    if match:
-        try:
-            data = json.loads(match.group(1))
-            if isinstance(data, dict):
-                return data
-        except json.JSONDecodeError:
-            pass
-
-    # 方法 3：找最外層 JSON 物件
-    match = re.search(r"\{.*\}", content, re.DOTALL)
-    if match:
-        try:
-            data = json.loads(match.group(0))
-            if isinstance(data, dict):
-                return data
-        except json.JSONDecodeError:
-            pass
-
-    return None
+def _rows_to_dicts(columns: list[str], raw_rows: list[str]) -> list[dict[str, str]]:
+    """將 pipe-separated 字串列轉換為 list[dict[str, str]]。"""
+    result = []
+    for row_str in raw_rows:
+        values = [v.strip() for v in row_str.split("|")]
+        # 補齊或截斷至 columns 長度
+        values += [""] * max(0, len(columns) - len(values))
+        result.append(dict(zip(columns, values[: len(columns)])))
+    return result
 
 
 async def form_structurer(state: GraphState) -> dict:
     """
-    根據 context 和 query 生成結構化表單 JSON。
-    非同步節點。
+    根據 context 和 query 生成結構化表單。
+    rows 以 pipe-separated 字串回傳，Python 側轉換為 dict 格式。
     """
     llm = ChatOpenAI(
-        model=settings.llm_model,
+        model=settings.form_model,
         api_key=settings.openai_api_key,
         temperature=0,
-    )
+    ).with_structured_output(FormSchema, method="function_calling")
 
+    context = state.get("context", "")
     user_content = (
         f"使用者需求：{state['query']}\n\n"
-        f"參考文件：\n{state.get('context', '')}"
+        f"參考文件：\n{context[:_FORM_CONTEXT_LIMIT]}"
     )
 
-    result = await llm.ainvoke([
-        SystemMessage(content=_FORM_SYSTEM_PROMPT),
-        HumanMessage(content=user_content),
-    ])
+    try:
+        result: FormSchema = await llm.ainvoke([
+            SystemMessage(content=_FORM_SYSTEM_PROMPT),
+            HumanMessage(content=user_content),
+        ])
 
-    form_data = _parse_form_json(result.content)
+        form_dict = result.model_dump(exclude_none=True)
+        # 將 pipe-separated rows 轉換為前端期望的 list[dict[str, str]]
+        form_dict["rows"] = _rows_to_dicts(result.columns, result.rows)
 
-    return {"form_data": form_data}
+        return {"form_data": form_dict}
+    except Exception:
+        return {"form_data": None}
