@@ -1,6 +1,13 @@
 import os
 from contextlib import asynccontextmanager
 
+# pydantic_settings 讀取 .env 但不寫回 os.environ，LangChain 需要從 os.environ 讀取
+from app.config import settings as _s
+if _s.langchain_api_key:
+    os.environ.setdefault("LANGCHAIN_TRACING_V2", _s.langchain_tracing_v2)
+    os.environ.setdefault("LANGCHAIN_API_KEY", _s.langchain_api_key)
+    os.environ.setdefault("LANGCHAIN_PROJECT", _s.langchain_project)
+
 import aiosqlite
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
