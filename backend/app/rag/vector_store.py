@@ -11,6 +11,7 @@ vector_store.py — ChromaDB 連線與向量搜尋介面
 from __future__ import annotations
 
 import asyncio
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,10 @@ COLLECTION_NAME = "construction_knowledge"
 _chroma_client: chromadb.PersistentClient | None = None
 _collection = None
 _openai_client: AsyncOpenAI | None = None
+
+# Embedding LRU cache（相同 query 不重打 OpenAI API）
+_EMBED_CACHE_MAXSIZE = 512
+_embed_cache: OrderedDict[str, list[float]] = OrderedDict()
 
 
 def _resolve_chroma_path() -> str:
@@ -62,13 +67,23 @@ def _get_openai_client() -> AsyncOpenAI:
 
 
 async def get_embedding(text: str) -> list[float]:
-    """取得文字的 embedding 向量（async）"""
+    """取得文字的 embedding 向量（async，LRU cache 512 筆）"""
+    if text in _embed_cache:
+        _embed_cache.move_to_end(text)
+        return _embed_cache[text]
+
     client = _get_openai_client()
     response = await client.embeddings.create(
         model=settings.embedding_model,
         input=[text],
     )
-    return response.data[0].embedding
+    embedding = response.data[0].embedding
+
+    _embed_cache[text] = embedding
+    if len(_embed_cache) > _EMBED_CACHE_MAXSIZE:
+        _embed_cache.popitem(last=False)
+
+    return embedding
 
 
 async def search(

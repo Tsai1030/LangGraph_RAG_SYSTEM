@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     # OpenAI
     openai_api_key: str
     llm_model: str = "gpt-5.4"
+    grader_model: str = "gpt-5.4-mini"
     embedding_model: str = "text-embedding-3-small"
 
     # Database (SQLite)

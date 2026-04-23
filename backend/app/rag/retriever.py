@@ -73,15 +73,18 @@ async def retrieve(
 ) -> list[dict]:
     """
     Hybrid 搜尋：向量 top-20 + BM25 top-20 → RRF → 回傳前 n_results 筆。
+    向量搜尋與 BM25 計算透過 asyncio.gather 平行執行。
     """
     await _ensure_bm25()
 
-    # 向量搜尋（取更多候選）
-    vector_hits = await search(query, n_results=20)
-
-    # BM25 搜尋
     tokens = _tokenize(query)
-    bm25_scores = _bm25.get_scores(tokens)  # type: ignore[union-attr]
+
+    # 向量搜尋（async）與 BM25 計算（CPU，移至 thread）平行執行
+    vector_hits, bm25_scores = await asyncio.gather(
+        search(query, n_results=20),
+        asyncio.to_thread(_bm25.get_scores, tokens),  # type: ignore[union-attr]
+    )
+
     top_indices = sorted(
         range(len(bm25_scores)), key=lambda i: bm25_scores[i], reverse=True
     )[:20]

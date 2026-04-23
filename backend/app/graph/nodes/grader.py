@@ -36,7 +36,7 @@ async def retrieval_grader(state: GraphState) -> dict:
     if not context or context == "（無相關文件）":
         return {"retrieval_grade": "insufficient"}
 
-    llm = ChatOpenAI(model=settings.llm_model, api_key=settings.openai_api_key, temperature=0)
+    llm = ChatOpenAI(model=settings.grader_model, api_key=settings.openai_api_key, temperature=0)
     result = await llm.ainvoke([
         SystemMessage(content=_GRADER_SYSTEM),
         HumanMessage(content=f"問題：{query}\n\n參考文件（前 800 字）：\n{context[:800]}"),
@@ -54,7 +54,7 @@ async def query_rewriter(state: GraphState) -> dict:
     original = state.get("rewritten_query") or state["query"]
     retry_count = state.get("retry_count") or 0
 
-    llm = ChatOpenAI(model=settings.llm_model, api_key=settings.openai_api_key, temperature=0)
+    llm = ChatOpenAI(model=settings.grader_model, api_key=settings.openai_api_key, temperature=0)
     result = await llm.ainvoke([
         SystemMessage(content=_REWRITER_SYSTEM),
         HumanMessage(content=original),
