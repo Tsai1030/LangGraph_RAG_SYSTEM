@@ -117,7 +117,7 @@ export default function MessageBubble({
       {lightbox && (
         <Lightbox src={lightbox.src} alt={lightbox.alt} onClose={() => setLightbox(null)} />
       )}
-      <div className="flex px-4 md:px-6 animate-fade-up">
+      <div className="flex items-start px-4 md:px-6 animate-fade-up">
         <div className="flex-1 min-w-0 pb-1">
           {/* Message content */}
           <div className={cn("prose-chat text-[15px]", isStreaming && !message.content && "py-1")}>

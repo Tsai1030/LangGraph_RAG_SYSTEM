@@ -108,9 +108,19 @@ body {
 .sidebar-scroll::-webkit-scrollbar-thumb { background: #27272a; }
 .sidebar-scroll::-webkit-scrollbar-thumb:hover { background: #3f3f46; }
 
+/* Dot-grid background for welcome page */
+.bg-dot-grid {
+  background-image: radial-gradient(oklch(0.87 0.004 65) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
 /* Animations */
 @keyframes fadeUp {
   from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(12px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 @keyframes blink {
@@ -126,6 +136,7 @@ body {
 }
 
 .animate-fade-up       { animation: fadeUp 0.2s ease-out both; }
+.animate-slide-up      { animation: slideUp 0.28s ease-out both; }
 .animate-spin-fast     { animation: spinFast 0.7s linear infinite; }
 
 /* Streaming cursor */

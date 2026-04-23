@@ -5,7 +5,6 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
     <div className="min-h-screen grid lg:grid-cols-2">
       {/* Left panel — branding */}
       <div className="hidden lg:flex flex-col justify-between px-12 py-10 relative overflow-hidden">
-        {/* 背景圖片 */}
         <Image
           src="/login_img.jpg"
           alt=""
@@ -14,34 +13,59 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
           className="object-cover"
           priority
         />
-        {/* 深色遮罩，確保文字可讀性 */}
-        <div className="absolute inset-0 bg-zinc-950/60" />
+        {/* Gradient overlay — stronger at bottom for text legibility */}
+        <div className="absolute inset-0 bg-gradient-to-b from-zinc-950/55 via-zinc-950/50 to-zinc-950/75" />
 
-        {/* 內容層（z-10 確保在背景圖與遮罩之上） */}
+        {/* Brand mark */}
         <div className="relative z-10 flex items-center gap-3">
-          <Image src="/logo.png" alt="營造知識助理" width={44} height={44} className="size-11 object-contain" />
-          <span className="text-zinc-100 font-semibold text-xl">營造知識助理</span>
+          <Image
+            src="/logo.png"
+            alt="營造知識助理"
+            width={40}
+            height={40}
+            className="size-10 object-contain"
+          />
+          <span className="text-zinc-100 font-semibold text-lg tracking-tight">營造知識助理</span>
         </div>
 
+        {/* Quote + stats */}
         <div className="relative z-10">
-          <blockquote className="text-zinc-300 text-lg font-light leading-relaxed mb-6">
-            「整合 51 份營造業作業規範，<br />
-            讓每位員工隨時獲得精準的知識支援。」
-          </blockquote>
-          <div className="flex gap-6 text-zinc-400 text-xs">
-            <div><p className="text-zinc-300 font-semibold text-2xl">1,375</p><p>知識片段</p></div>
-            <div><p className="text-zinc-300 font-semibold text-2xl">51</p><p>份文件</p></div>
-            <div><p className="text-zinc-300 font-semibold text-2xl">RAG</p><p>智能檢索</p></div>
+          <p className="text-zinc-200 text-[1.65rem] font-light leading-snug tracking-tight mb-1">
+            整合 51 份作業規範，
+          </p>
+          <p className="text-white text-[1.65rem] font-semibold leading-snug tracking-tight mb-10">
+            讓每位員工隨時獲得精準知識支援。
+          </p>
+
+          <div className="flex gap-10">
+            {[
+              { num: "1,375", label: "知識片段" },
+              { num: "51",    label: "份文件" },
+              { num: "RAG",   label: "智能檢索" },
+            ].map((s) => (
+              <div key={s.label}>
+                <p className="text-white text-3xl font-bold tracking-tight">{s.num}</p>
+                <p className="text-zinc-400 text-xs mt-1">{s.label}</p>
+              </div>
+            ))}
           </div>
         </div>
 
-        <p className="relative z-10 text-zinc-400 text-xs">© 2026 Construction Knowledge AI</p>
+        <p className="relative z-10 text-zinc-500 text-xs">© 2026 Construction Knowledge AI</p>
       </div>
 
       {/* Right panel — form */}
-      <div className="flex items-center justify-center px-6 py-12 bg-zinc-50">
-        <div className="w-full max-w-sm">
-          {children}
+      <div className="flex flex-col bg-dot-grid">
+        {/* Mobile logo — only shown when left panel is hidden */}
+        <div className="lg:hidden flex items-center gap-2.5 px-6 pt-8 pb-2">
+          <Image src="/logo.png" alt="" width={28} height={28} className="size-7 object-contain" />
+          <span className="text-zinc-800 font-semibold text-sm tracking-tight">營造知識助理</span>
+        </div>
+
+        <div className="flex-1 flex items-center justify-center px-6 py-12">
+          <div className="w-full max-w-sm bg-white rounded-3xl border border-zinc-200 shadow-sm px-8 py-9">
+            {children}
+          </div>
         </div>
       </div>
     </div>

@@ -2,17 +2,17 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowUp } from "lucide-react";
+import { ArrowUp, Route, Receipt, ShieldCheck, Building2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import api from "@/lib/api";
 import { useChatStore } from "@/store/chatStore";
 import type { ConversationOut } from "@/types";
 
 const SUGGESTIONS = [
-  "工地施工動線規劃",
-  "採購發包的金額分級",
-  "安全衛生管理規定",
-  "工務所辦公室設置",
+  { q: "工地施工動線規劃", icon: Route },
+  { q: "採購發包的金額分級", icon: Receipt },
+  { q: "安全衛生管理規定", icon: ShieldCheck },
+  { q: "工務所辦公室設置", icon: Building2 },
 ];
 
 export default function NewPage() {
@@ -22,7 +22,6 @@ export default function NewPage() {
   const [value, setValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // 自動調整 textarea 高度
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
@@ -48,10 +47,10 @@ export default function NewPage() {
 
   const inputBox = (placeholder: string) => (
     <div className={cn(
-      "flex items-end gap-2 rounded-4xl border bg-white shadow-sm px-4 py-3 transition-shadow",
+      "flex items-end gap-2 rounded-4xl border bg-white shadow-sm px-4 py-3 transition-all duration-200",
       creating
         ? "border-zinc-200 opacity-60"
-        : "border-zinc-200 hover:border-zinc-300 focus-within:border-zinc-400 focus-within:shadow-md"
+        : "border-zinc-200 hover:border-zinc-300 focus-within:border-zinc-400 focus-within:shadow-lg"
     )}>
       <textarea
         ref={textareaRef}
@@ -70,8 +69,8 @@ export default function NewPage() {
         onClick={() => handleSend(value)}
         disabled={!canSend}
         className={cn(
-          "shrink-0 size-8 rounded-full flex items-center justify-center transition-all",
-          canSend ? "bg-zinc-900 hover:bg-zinc-700" : "bg-zinc-100 cursor-not-allowed"
+          "shrink-0 size-8 rounded-full flex items-center justify-center transition-all duration-150",
+          canSend ? "bg-zinc-900 hover:bg-zinc-700 active:scale-95" : "bg-zinc-100 cursor-not-allowed"
         )}
         title="送出"
       >
@@ -82,41 +81,59 @@ export default function NewPage() {
 
   return (
     <>
-      {/* ── Desktop layout (md+): input centered at 28vh ── */}
-      <div className="hidden md:flex flex-col h-full items-center bg-background px-4 select-none overflow-y-auto">
-        <div className="w-full max-w-2xl flex flex-col gap-4 pt-[28vh]">
-          <div className="text-center mb-1">
-            <h2 className="text-2xl font-semibold text-zinc-800">有什麼可以幫您？</h2>
-            <p className="text-base text-zinc-400 mt-1">查詢工地作業規範，或生成結構化作業表單</p>
+      {/* ── Desktop layout ── */}
+      <div className="hidden md:flex flex-col h-full items-center bg-dot-grid px-4 select-none overflow-y-auto">
+        <div className="w-full max-w-2xl flex flex-col gap-5 pt-[24vh]">
+          {/* Brand mark */}
+          <div className="flex flex-col items-center gap-3 mb-2">
+            <div className="text-center">
+              <h2 className="text-[2rem] font-bold tracking-tight text-zinc-900 leading-tight">
+                有什麼可以幫您？
+              </h2>
+              <p className="text-[0.95rem] text-zinc-400 mt-1.5">
+                查詢工地作業規範，或生成結構化作業表單
+              </p>
+            </div>
           </div>
+
+          {/* Input */}
           {inputBox("輸入問題，例如：動員開工需要哪些初期計畫？")}
-          <p className="text-center text-xs text-zinc-400 -mt-2 select-none">
+          <p className="text-center text-[11px] text-zinc-400 -mt-2 select-none">
             AI 有時會犯錯，需要二次查驗
           </p>
-          <div className="flex gap-2">
-            {SUGGESTIONS.map((q) => (
+
+          {/* Suggestion cards */}
+          <div className="grid grid-cols-2 gap-2.5">
+            {SUGGESTIONS.map((item, i) => (
               <button
-                key={q}
-                onClick={() => handleSend(q)}
+                key={item.q}
+                onClick={() => handleSend(item.q)}
                 disabled={creating}
-                className="flex-1 px-3 py-3 rounded-2xl border border-zinc-200 bg-white text-sm text-zinc-600 hover:text-zinc-900 hover:border-zinc-300 hover:shadow-sm transition-all text-center disabled:opacity-50 disabled:cursor-not-allowed"
+                className="group animate-slide-up flex flex-col gap-3 px-4 py-4 rounded-2xl border border-zinc-200 bg-white text-left hover:border-zinc-300 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ animationDelay: `${i * 55}ms` }}
               >
-                {q}
+                <item.icon
+                  size={15}
+                  className="text-zinc-400 group-hover:text-zinc-700 transition-colors duration-200"
+                />
+                <span className="text-[13px] text-zinc-600 group-hover:text-zinc-900 leading-snug transition-colors duration-200 font-medium">
+                  {item.q}
+                </span>
               </button>
             ))}
           </div>
         </div>
       </div>
 
-      {/* ── Mobile layout: input pinned to bottom ── */}
-      <div className="md:hidden flex flex-col h-full bg-background select-none">
-        {/* Title — centered in remaining space, with top padding for hamburger */}
-        <div className="flex-1 flex flex-col items-center justify-center px-6 pt-12">
-          <h2 className="text-2xl font-semibold text-zinc-800">有什麼可以幫您？</h2>
-          <p className="text-base text-zinc-400 mt-1 text-center">查詢工地作業規範，或生成結構化作業表單</p>
+      {/* ── Mobile layout ── */}
+      <div className="md:hidden flex flex-col h-full bg-dot-grid select-none">
+        <div className="flex-1 flex flex-col items-center justify-center px-6 pt-12 gap-3">
+          <div className="text-center">
+            <h2 className="text-2xl font-bold tracking-tight text-zinc-900">有什麼可以幫您？</h2>
+            <p className="text-sm text-zinc-400 mt-1.5 text-center">查詢工地規範或生成作業表單</p>
+          </div>
         </div>
 
-        {/* Bottom: 2 suggestion cards + input + disclaimer */}
         <div className="px-4 pb-6 flex flex-col gap-3">
           {inputBox("想問就問")}
           <p className="text-center text-[11px] text-zinc-400 select-none">

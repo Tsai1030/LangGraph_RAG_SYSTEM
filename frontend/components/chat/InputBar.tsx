@@ -43,8 +43,8 @@ export default function InputBar({ onSend, onStop, isStreaming, disabled }: Prop
     <div className="px-4 pb-4">
       <div className="max-w-3xl mx-auto">
         <div className={cn(
-          "flex items-end gap-2 rounded-4xl border bg-white shadow-sm px-4 py-3 transition-shadow",
-          disabled ? "border-zinc-200 opacity-60" : "border-zinc-200 hover:border-zinc-300 focus-within:border-zinc-400 focus-within:shadow-md"
+          "flex items-end gap-2 rounded-4xl border bg-white shadow-sm px-4 py-3 transition-all duration-200",
+          disabled ? "border-zinc-200 opacity-60" : "border-zinc-200 hover:border-zinc-300 focus-within:border-zinc-400 focus-within:shadow-lg"
         )}>
           <textarea
             ref={ref}
@@ -73,8 +73,8 @@ export default function InputBar({ onSend, onStop, isStreaming, disabled }: Prop
               onClick={handleSend}
               disabled={!canSend}
               className={cn(
-                "shrink-0 size-8 rounded-full flex items-center justify-center transition-all",
-                canSend ? "bg-zinc-900 hover:bg-zinc-700" : "bg-zinc-100 cursor-not-allowed"
+                "shrink-0 size-8 rounded-full flex items-center justify-center transition-all duration-150",
+                canSend ? "bg-zinc-900 hover:bg-zinc-700 active:scale-95" : "bg-zinc-100 cursor-not-allowed"
               )}
               title="送出"
             >
