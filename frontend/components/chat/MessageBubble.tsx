@@ -15,6 +15,7 @@ import ExportButton from "@/components/form/ExportButton";
 interface Props {
   message: MessageOut;
   isStreaming?: boolean;
+  isFormLoading?: boolean;
   streamingSources?: Source[];
   streamingFormData?: FormDataType | null;
 }
@@ -74,6 +75,15 @@ function createMarkdownComponents(onImageClick: (src: string, alt: string) => vo
   };
 }
 
+function FormLoadingCard() {
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 mb-3">
+      <div className="size-4 shrink-0 rounded-full border-2 border-zinc-400 border-t-transparent animate-spin" />
+      <span className="text-sm text-zinc-500">表單生成中...</span>
+    </div>
+  );
+}
+
 function ThinkingDots() {
   return (
     <div className="flex items-center gap-1 h-5 py-1">
@@ -89,7 +99,7 @@ function ThinkingDots() {
 }
 
 export default function MessageBubble({
-  message, isStreaming = false, streamingSources, streamingFormData,
+  message, isStreaming = false, isFormLoading = false, streamingSources, streamingFormData,
 }: Props) {
   const isUser = message.role === "user";
   const sources: Source[] = streamingSources ?? message.meta?.sources ?? [];
@@ -119,26 +129,29 @@ export default function MessageBubble({
       )}
       <div className="flex items-start px-4 md:px-6 animate-fade-up">
         <div className="flex-1 min-w-0 pb-1">
+          {/* Form loading card — shown before text while form_structurer is running */}
+          {isFormLoading && !formData && <FormLoadingCard />}
+
+          {/* Form preview — shown before text once form_data arrives */}
+          {formData && (
+            <div className="mb-3">
+              <FormPreview formData={formData} />
+              <ExportButton formData={formData} filename={formData.title} />
+            </div>
+          )}
+
           {/* Message content */}
-          <div className={cn("prose-chat text-[15px]", isStreaming && !message.content && "py-1")}>
+          <div className={cn("prose-chat text-[15px]", isStreaming && !message.content && !isFormLoading && "py-1")}>
             {message.content ? (
               <div className={cn(isStreaming && "streaming-cursor")}>
                 <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
                   {message.content}
                 </ReactMarkdown>
               </div>
-            ) : (
+            ) : !isFormLoading ? (
               <ThinkingDots />
-            )}
+            ) : null}
           </div>
-
-          {/* Form preview */}
-          {formData && (
-            <div className="mt-3">
-              <FormPreview formData={formData} />
-              <ExportButton formData={formData} filename={formData.title} />
-            </div>
-          )}
 
           {/* Sources */}
           {sources.length > 0 && !isStreaming && (

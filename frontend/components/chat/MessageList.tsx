@@ -18,6 +18,7 @@ interface Props {
   streamingMessage: MessageOut | null;
   streamingFormData: FormDataType | null;
   streamingSources: Source[];
+  isFormLoading?: boolean;
   onSuggestedQuery: (q: string) => void;
   loading?: boolean;
   onAtBottomChange?: (atBottom: boolean) => void;
@@ -68,7 +69,7 @@ function LoadingSkeleton() {
 
 export default function MessageList({
   messages, streamingMessage, streamingFormData,
-  streamingSources, onSuggestedQuery, loading = false,
+  streamingSources, isFormLoading = false, onSuggestedQuery, loading = false,
   onAtBottomChange, scrollToBottomRef,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -136,6 +137,7 @@ export default function MessageList({
               <MessageBubble
                 message={streamingMessage}
                 isStreaming
+                isFormLoading={isFormLoading}
                 streamingFormData={streamingFormData}
                 streamingSources={streamingSources}
               />

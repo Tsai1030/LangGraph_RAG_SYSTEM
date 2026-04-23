@@ -23,18 +23,23 @@ _FORM_KEYWORDS = [
     "表單", "檢核表", "清單", "生成表", "下載", "填寫",
     "報表", "報告書", "格式", "列表", "產生表", "製作表",
     "excel", "csv", "輸出表", "匯出", "制式", "樣板",
+    "表格", "一覽表", "記錄表", "申請表", "登記表", "簽到表",
+    "制表", "整理成表", "建立表", "幫我做表", "幫我整理",
+    "幫我列出", "幫我生成", "幫我產生", "幫我建立",
 ]
 
 _INTENT_SYSTEM_PROMPT = """\
 判斷使用者問題的意圖，只輸出一個詞，不要其他文字：
-- 若使用者想要生成、下載可填寫的結構化表格、檢核表、報表 → 輸出：form_request
-- 若使用者只是詢問知識、流程、規定、步驟 → 輸出：qa"""
+- 若使用者想要「生成、製作、下載、匯出」任何形式的表格、清單、檢核表、報表 → 輸出：form_request
+- 若使用者請求整理資料成表格格式，或要求可下載的結構化資料 → 輸出：form_request
+- 若使用者只是詢問知識、流程、規定、說明、步驟 → 輸出：qa
+- 遇到模糊情況，優先判斷為 form_request"""
 
 
 async def intent_classifier(state: GraphState) -> dict:
     """
     分類使用者意圖。
-    先用關鍵字規則，無法確定再呼叫 LLM。
+    先用關鍵字規則，無法確定再呼叫 LLM（使用 grader_model 加速）。
     """
     query = state["query"]
     query_lower = query.lower()
@@ -43,9 +48,9 @@ async def intent_classifier(state: GraphState) -> dict:
     if any(kw in query_lower for kw in _FORM_KEYWORDS):
         return {"intent": "form_request", "form_type": None}
 
-    # LLM 判斷（語意複雜的情況）
+    # LLM 判斷（語意複雜的情況）— 用 grader_model 加速
     llm = ChatOpenAI(
-        model=settings.llm_model,
+        model=settings.grader_model,
         api_key=settings.openai_api_key,
         temperature=0,
     )

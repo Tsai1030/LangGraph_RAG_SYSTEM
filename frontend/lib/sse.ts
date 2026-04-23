@@ -5,6 +5,7 @@ export async function streamChat(
   conversationId: string,
   message: string,
   onText: (text: string) => void,
+  onFormLoading: () => void,
   onForm: (formData: FormData) => void,
   onSources: (sources: Source[]) => void,
   onDone: () => void,
@@ -49,6 +50,9 @@ export async function streamChat(
       switch (event.type) {
         case "text":
           onText(event.content);
+          break;
+        case "form_loading":
+          onFormLoading();
           break;
         case "form":
           onForm(event.data);

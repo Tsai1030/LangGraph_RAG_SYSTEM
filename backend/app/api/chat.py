@@ -100,13 +100,32 @@ async def chat_stream(
     async def event_generator() -> AsyncGenerator[str, None]:
         assistant_response = ""
         had_error = False
+        form_data_sent = False  # 避免 form 事件重複推送
 
         try:
             async for event in graph.astream_events(
                 initial_state, config, version="v2"
             ):
                 event_type = event.get("event", "")
+                event_name = event.get("name", "")
                 node_name = event.get("metadata", {}).get("langgraph_node", "")
+
+                # form_structurer 開始 → 前端顯示「表單生成中」
+                if event_type == "on_chain_start" and event_name == "form_structurer":
+                    yield (
+                        f"data: {json.dumps({'type': 'form_loading'})}\n\n"
+                    )
+
+                # form_structurer 完成 → 立即推送表單（在 responder 文字之前）
+                if event_type == "on_chain_end" and event_name == "form_structurer":
+                    output = event.get("data", {}).get("output") or {}
+                    if isinstance(output, dict):
+                        form_data = output.get("form_data")
+                        if form_data:
+                            form_data_sent = True
+                            yield (
+                                f"data: {json.dumps({'type': 'form', 'data': form_data}, ensure_ascii=False)}\n\n"
+                            )
 
                 # 捕捉 responder 節點的串流 token
                 if event_type == "on_chat_model_stream" and node_name == "responder":
@@ -123,7 +142,7 @@ async def chat_stream(
                 f"data: {json.dumps({'type': 'error', 'content': str(exc)}, ensure_ascii=False)}\n\n"
             )
 
-        # ── 7. graph 完成後：取最終狀態推送 sources / form ────
+        # ── 7. graph 完成後：取最終狀態推送 sources；form 若已推送則跳過 ────
         if not had_error:
             try:
                 final = await graph.aget_state(config)
@@ -135,11 +154,13 @@ async def chat_stream(
                         f"data: {json.dumps({'type': 'sources', 'data': sources}, ensure_ascii=False)}\n\n"
                     )
 
-                form_data = final_values.get("form_data")
-                if form_data:
-                    yield (
-                        f"data: {json.dumps({'type': 'form', 'data': form_data}, ensure_ascii=False)}\n\n"
-                    )
+                # 僅在串流期間未推送時才補送（備援）
+                if not form_data_sent:
+                    form_data = final_values.get("form_data")
+                    if form_data:
+                        yield (
+                            f"data: {json.dumps({'type': 'form', 'data': form_data}, ensure_ascii=False)}\n\n"
+                        )
 
             except Exception:
                 pass  # 取狀態失敗不影響已串流的文字

@@ -16,6 +16,7 @@ export default function ChatPage() {
 
   const [loading, setLoading] = useState(true);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [isFormLoading, setIsFormLoading] = useState(false);
   const [streamingMessage, setStreamingMessage] = useState<MessageOut | null>(null);
   const [streamingFormData, setStreamingFormData] = useState<FormDataType | null>(null);
   const [streamingSources, setStreamingSources] = useState<Source[]>([]);
@@ -91,6 +92,7 @@ export default function ChatPage() {
     });
     setStreamingFormData(null);
     setStreamingSources([]);
+    setIsFormLoading(false);
     setIsStreaming(true);
 
     const controller = new AbortController();
@@ -110,10 +112,12 @@ export default function ChatPage() {
             prev ? { ...prev, content: accumulated } : null
           );
         },
-        (formData) => { latestFormData = formData; setStreamingFormData(formData); },
+        () => { setIsFormLoading(true); },
+        (formData) => { setIsFormLoading(false); latestFormData = formData; setStreamingFormData(formData); },
         (sources) => { latestSources = sources; setStreamingSources(sources); },
         () => {
           // on done
+          setIsFormLoading(false);
           const finalMsg: MessageOut = {
             id: assistantId,
             role: "assistant",
@@ -161,6 +165,7 @@ export default function ChatPage() {
         streamingMessage={streamingMessage}
         streamingFormData={streamingFormData}
         streamingSources={streamingSources}
+        isFormLoading={isFormLoading}
         onSuggestedQuery={handleSend}
         loading={loading}
         onAtBottomChange={setIsAtBottom}
