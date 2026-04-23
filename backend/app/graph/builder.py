@@ -9,6 +9,11 @@ Graph 流程：
                                                        │
                                                   context_builder
                                                        │
+                                                 retrieval_grader  ◄─────────────────┐
+                                                  ├─ sufficient ───────────────────► │
+                                                  │                                  │ (loop, max 2)
+                                                  └─ insufficient ─► query_rewriter ─┘
+                                                       │ (sufficient OR max retries)
                                                  intent_classifier
                                                   ├─ form_request ─► form_structurer ─► responder
                                                   └─ qa ───────────────────────────── ─► responder
@@ -24,9 +29,12 @@ from app.graph.nodes.compact import compact_check, summarizer
 from app.graph.nodes.context import context_builder
 from app.graph.nodes.form import form_structurer
 from app.graph.nodes.generation import responder
+from app.graph.nodes.grader import query_rewriter, retrieval_grader
 from app.graph.nodes.intent import intent_classifier
 from app.graph.nodes.retrieval import retriever
 from app.graph.state import GraphState
+
+_MAX_RETRIES = 2
 
 
 def _route_compact(state: GraphState) -> str:
@@ -37,6 +45,13 @@ def _route_compact(state: GraphState) -> str:
 def _route_intent(state: GraphState) -> str:
     """intent_classifier 後的條件路由"""
     return "form_structurer" if state.get("intent") == "form_request" else "responder"
+
+
+def _route_grader(state: GraphState) -> str:
+    """retrieval_grader 後的條件路由：insufficient 且未超過重試上限 → 重寫查詢；其餘 → 繼續生成"""
+    if state.get("retrieval_grade") == "insufficient" and (state.get("retry_count") or 0) < _MAX_RETRIES:
+        return "query_rewriter"
+    return "intent_classifier"
 
 
 def build_graph(checkpointer=None):
@@ -56,6 +71,8 @@ def build_graph(checkpointer=None):
     graph.add_node("summarizer", summarizer)
     graph.add_node("retriever", retriever)
     graph.add_node("context_builder", context_builder)
+    graph.add_node("retrieval_grader", retrieval_grader)
+    graph.add_node("query_rewriter", query_rewriter)
     graph.add_node("intent_classifier", intent_classifier)
     graph.add_node("form_structurer", form_structurer)
     graph.add_node("responder", responder)
@@ -73,7 +90,11 @@ def build_graph(checkpointer=None):
 
     # RAG 主流程
     graph.add_edge("retriever", "context_builder")
-    graph.add_edge("context_builder", "intent_classifier")
+
+    # CRAG 閉環：context_builder → retrieval_grader → (query_rewriter → retriever) 或 intent_classifier
+    graph.add_edge("context_builder", "retrieval_grader")
+    graph.add_conditional_edges("retrieval_grader", _route_grader)
+    graph.add_edge("query_rewriter", "retriever")
 
     # intent_classifier → form_structurer 或 responder（條件邊）
     graph.add_conditional_edges("intent_classifier", _route_intent)

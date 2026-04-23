@@ -43,3 +43,8 @@ class GraphState(TypedDict):
     is_compact_needed: bool
     token_count: int
     summary: Optional[str]         # 壓縮後的對話摘要
+
+    # ── CRAG 閉環控制 ─────────────────────────────────────────
+    retrieval_grade: str            # 'sufficient' | 'insufficient'
+    retry_count: int                # 已重試次數（上限 2）
+    rewritten_query: Optional[str] # query_rewriter 改寫後的查詢
