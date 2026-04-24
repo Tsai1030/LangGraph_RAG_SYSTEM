@@ -72,7 +72,7 @@ export default function ChatPage() {
 
     // Optimistic user message
     const userMsg: MessageOut = {
-      id: crypto.randomUUID(),
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
       role: "user",
       content: text,
       meta: null,
@@ -82,7 +82,7 @@ export default function ChatPage() {
     scrollToBottomRef.current?.();
 
     // Streaming assistant placeholder
-    const assistantId = crypto.randomUUID();
+    const assistantId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     setStreamingMessage({
       id: assistantId,
       role: "assistant",
