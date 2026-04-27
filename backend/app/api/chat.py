@@ -95,8 +95,12 @@ async def chat_stream(
         "token_count": 0,
         "summary": summary_text,
         "need_retrieval": True,
-        "retrieval_query": None,   # 每輪重置，避免上輪改寫結果污染本輪
-        "retry_count": 0,          # 每輪重置 CRAG 重試計數器
+        "retrieval_query": None,          # 每輪重置，避免上輪改寫結果污染本輪
+        "retry_count": 0,                 # 每輪重置 CRAG 重試計數器
+        "grader_reason": None,            # 每輪重置
+        "grader_missing_information": None,
+        "matched_forms": [],              # 靜態表單匹配結果
+        "form_explicit": False,           # 是否為明確表單下載請求
     }
 
     # ── 6. SSE 事件生成器 ─────────────────────────────────────
@@ -154,6 +158,12 @@ async def chat_stream(
                     f"data: {json.dumps({'type': 'form', 'data': form_data}, ensure_ascii=False)}\n\n"
                 )
 
+            matched_forms = final_values.get("matched_forms", [])
+            if matched_forms:
+                yield (
+                    f"data: {json.dumps({'type': 'form_files', 'data': matched_forms}, ensure_ascii=False)}\n\n"
+                )
+
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
         # ── 8. 儲存 AI 回覆至 app.db ──────────────────────────
@@ -165,6 +175,8 @@ async def chat_stream(
                         meta["sources"] = final_values["sources"]
                     if final_values.get("form_data"):
                         meta["form_data"] = final_values["form_data"]
+                    if final_values.get("matched_forms"):
+                        meta["form_files"] = final_values["matched_forms"]
                     await save_message(
                         save_db,
                         conversation_id,

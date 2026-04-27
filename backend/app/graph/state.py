@@ -53,3 +53,7 @@ class GraphState(TypedDict):
     retrieval_query: Optional[str]  # 檢索用查詢（rewriter 改寫後）；原始 query 永不覆寫
     grader_reason: Optional[str]             # grader 的判斷依據
     grader_missing_information: Optional[str]  # grader 指出缺少的資訊（供 rewriter 參考）
+
+    # ── 靜態表單 ──────────────────────────────────────────────
+    matched_forms: list[dict]       # registry 匹配的靜態表單 [{form_id, display_name, download_url}]
+    form_explicit: bool             # True = 使用者明確索取表單檔案（直接下載），False = 主題相關詢問

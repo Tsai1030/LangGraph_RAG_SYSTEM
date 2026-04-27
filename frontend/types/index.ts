@@ -31,6 +31,7 @@ export interface MessageOut {
 export interface MessageMeta {
   sources?: Source[];
   form_data?: FormData;
+  form_files?: FormFile[];
   token_count?: number;
 }
 
@@ -62,9 +63,17 @@ export interface FormData {
   notes?: string;
 }
 
+// Static Form Files
+export interface FormFile {
+  form_id: string;
+  display_name: string;
+  download_url: string;
+}
+
 // SSE Events
 export type SSEEvent =
   | { type: "text"; content: string }
   | { type: "form"; data: FormData }
+  | { type: "form_files"; data: FormFile[] }
   | { type: "sources"; data: Source[] }
   | { type: "done" };

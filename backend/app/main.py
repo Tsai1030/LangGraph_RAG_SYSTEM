@@ -18,14 +18,19 @@ if _s.langchain_api_key:
     os.environ.setdefault("LANGCHAIN_PROJECT", _s.langchain_project)
 
 import aiosqlite
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
+from urllib.parse import quote
+
 from app.config import settings
 from app.api import auth, conversations, chat, export
+from app.core.dependencies import get_current_user
 from app.graph.builder import build_graph
+from app.models.user import User
+from app.rag.form_lookup import get_form_path
 
 from pathlib import Path
 
@@ -128,6 +133,24 @@ async def serve_image(image_path: str):
                     return FileResponse(candidate2)
 
     raise HTTPException(status_code=404, detail=f"Image not found: {image_path}")
+
+
+@app.get("/api/forms/{form_id}/download")
+async def download_form(
+    form_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """下載靜態表單 .docx 檔案"""
+    path = get_form_path(form_id)
+    if path is None:
+        raise HTTPException(status_code=404, detail=f"Form not found: {form_id}")
+    encoded_name = quote(path.name, safe="")
+    return FileResponse(
+        str(path),
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename=path.name,
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_name}"},
+    )
 
 
 @app.get("/api/health")

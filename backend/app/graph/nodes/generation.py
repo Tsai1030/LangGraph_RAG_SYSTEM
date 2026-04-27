@@ -48,7 +48,7 @@ def _build_messages(state: GraphState) -> list[BaseMessage]:
     summary = state.get("summary")
     summary_section = f"[前情摘要]\n{summary}\n" if summary else ""
 
-    # 表單提示（若本次有生成表單）
+    # 動態表單提示（若本次有生成 form_structurer 表單）
     form_data = state.get("form_data")
     form_hint = ""
     if form_data:
@@ -56,10 +56,18 @@ def _build_messages(state: GraphState) -> list[BaseMessage]:
         row_count = len(form_data.get("rows", []))
         form_hint = f"\n[本次已生成表單：「{title}」，共 {row_count} 筆資料]"
 
+    # QA 模式且有匹配靜態表單 → 在回答末尾加提示
+    matched_forms = state.get("matched_forms", [])
+    form_explicit = state.get("form_explicit", False)
+    form_offer_hint = ""
+    if matched_forms and not form_explicit:
+        names = "、".join(f"《{f['display_name']}》" for f in matched_forms)
+        form_offer_hint = f"\n[表單提示]\n回答結束後，在最後一行加上一句：「如需相關作業表單，可點擊下方 {names} 下載。」"
+
     system_content = _SYSTEM_PROMPT_TEMPLATE.format(
         summary_section=summary_section,
         context=state.get("context") or "（無相關文件）",
-    ) + form_hint
+    ) + form_hint + form_offer_hint
 
     msgs: list[BaseMessage] = [SystemMessage(content=system_content)]
 
@@ -71,11 +79,41 @@ def _build_messages(state: GraphState) -> list[BaseMessage]:
     return msgs
 
 
+_STATIC_FORM_SYSTEM = """\
+使用者明確索取了一份作業表單。請用一句繁體中文（20字以內）提示使用者點擊下方下載。
+格式範例：《表單名稱》，請點擊下方下載。
+禁止在句首加上「已找到」、「為您找到」等確認語，直接從《表單名稱》開始。"""
+
+
 async def responder(state: GraphState) -> dict:
     """
     生成回覆。
+    - 靜態表單明確請求：用短確認句，不做 RAG 生成
+    - 一般 QA（含表單提示）：完整 RAG 生成
     streaming=True：配合 LangGraph astream_events，讓 chat endpoint 可逐 token 推送 SSE。
     """
+    matched_forms = state.get("matched_forms", [])
+    form_explicit = state.get("form_explicit", False)
+
+    # 靜態表單明確請求：短確認句，跳過完整 RAG 系統提示
+    if form_explicit and matched_forms:
+        names = "、".join(f"《{f['display_name']}》" for f in matched_forms)
+        llm = ChatOpenAI(
+            model=settings.grader_model,
+            api_key=settings.openai_api_key,
+            temperature=0,
+            streaming=True,
+        )
+        response = await llm.ainvoke([
+            SystemMessage(content=_STATIC_FORM_SYSTEM),
+            HumanMessage(content=f"找到：{names}"),
+        ])
+        return {
+            "response": response.content,
+            "messages": [AIMessage(content=response.content)],
+        }
+
+    # 一般 QA / 動態表單生成
     llm = ChatOpenAI(
         model=settings.llm_model,
         api_key=settings.openai_api_key,

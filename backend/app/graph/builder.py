@@ -62,11 +62,16 @@ def _route_retrieval(state: GraphState) -> str:
 def _route_intent(state: GraphState) -> str:
     """
     intent_classifier 後的條件路由。
-    form_request 且尚未有 retrieved_chunks（來自 skip 路徑）→ 補做 retriever。
-    form_request 且已有 chunks → form_structurer。
+
+    靜態表單（form_explicit=True + matched_forms）→ 直接 responder，跳過 form_structurer。
+    動態表單（form_request，無靜態匹配）→ 有 chunks 進 form_structurer，否則先補 retriever。
     qa → responder。
     """
     if state.get("intent") == "form_request":
+        # 靜態表單：已明確比對到檔案，不需動態生成
+        if state.get("form_explicit") and state.get("matched_forms"):
+            return "responder"
+        # 動態表單：走既有的 form_structurer 路徑
         return "form_structurer" if state.get("retrieved_chunks") else "retriever"
     return "responder"
 

@@ -7,10 +7,11 @@ import remarkGfm from "remark-gfm";
 import type { Components } from "react-markdown";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { MessageOut, FormData as FormDataType, Source } from "@/types";
+import type { MessageOut, FormData as FormDataType, FormFile, Source } from "@/types";
 import SourcesPanel from "./SourcesPanel";
 import FormPreview from "@/components/form/FormPreview";
 import ExportButton from "@/components/form/ExportButton";
+import FormFileCard from "./FormFileCard";
 
 interface Props {
   message: MessageOut;
@@ -18,6 +19,7 @@ interface Props {
   isFormLoading?: boolean;
   streamingSources?: Source[];
   streamingFormData?: FormDataType | null;
+  streamingFormFiles?: FormFile[];
 }
 
 function Lightbox({ src, alt, onClose }: { src: string; alt: string; onClose: () => void }) {
@@ -99,12 +101,14 @@ function ThinkingDots() {
 }
 
 export default function MessageBubble({
-  message, isStreaming = false, isFormLoading = false, streamingSources, streamingFormData,
+  message, isStreaming = false, isFormLoading = false, streamingSources, streamingFormData, streamingFormFiles,
 }: Props) {
   const isUser = message.role === "user";
   const sources: Source[] = streamingSources ?? message.meta?.sources ?? [];
   const formData: FormDataType | null | undefined =
     streamingFormData !== undefined ? streamingFormData : message.meta?.form_data;
+  const formFiles: FormFile[] =
+    streamingFormFiles !== undefined ? (streamingFormFiles ?? []) : (message.meta?.form_files ?? []);
 
   const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
   const handleImageClick = useCallback((src: string, alt: string) => setLightbox({ src, alt }), []);
@@ -152,6 +156,15 @@ export default function MessageBubble({
               <ThinkingDots />
             ) : null}
           </div>
+
+          {/* Static form download cards */}
+          {formFiles.length > 0 && !isStreaming && (
+            <div className="mt-3 flex flex-col gap-2">
+              {formFiles.map((f) => (
+                <FormFileCard key={f.form_id} file={f} />
+              ))}
+            </div>
+          )}
 
           {/* Sources */}
           {sources.length > 0 && !isStreaming && (

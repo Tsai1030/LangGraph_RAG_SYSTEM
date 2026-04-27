@@ -8,7 +8,7 @@ import { streamChat } from "@/lib/sse";
 import { useChatStore } from "@/store/chatStore";
 import MessageList from "@/components/chat/MessageList";
 import InputBar from "@/components/chat/InputBar";
-import type { MessageOut, FormData as FormDataType, Source, ConversationDetail } from "@/types";
+import type { MessageOut, FormData as FormDataType, FormFile, Source, ConversationDetail } from "@/types";
 
 export default function ChatPage() {
   const { conversationId } = useParams<{ conversationId: string }>();
@@ -19,6 +19,7 @@ export default function ChatPage() {
   const [isFormLoading, setIsFormLoading] = useState(false);
   const [streamingMessage, setStreamingMessage] = useState<MessageOut | null>(null);
   const [streamingFormData, setStreamingFormData] = useState<FormDataType | null>(null);
+  const [streamingFormFiles, setStreamingFormFiles] = useState<FormFile[]>([]);
   const [streamingSources, setStreamingSources] = useState<Source[]>([]);
   const [isAtBottom, setIsAtBottom] = useState(true);
   const scrollToBottomRef = useRef<(() => void) | null>(null);
@@ -36,6 +37,7 @@ export default function ChatPage() {
     setCurrentMessages([]);
     setStreamingMessage(null);
     setStreamingFormData(null);
+    setStreamingFormFiles([]);
     setStreamingSources([]);
 
     api
@@ -64,7 +66,7 @@ export default function ChatPage() {
   const handleSend = useCallback(async (text: string) => {
     if (isStreaming) return;
 
-    // 若對話尚無標題，樂觀更新 sidebar（與後端 auto_set_title 邏輯一致：前 30 字）
+    // 若對話尚無標題，樂觀更新 sidebar
     const conv = conversations.find((c) => c.id === conversationId);
     if (conv && !conv.title) {
       updateConversationTitle(conversationId, text.slice(0, 30));
@@ -91,6 +93,7 @@ export default function ChatPage() {
       created_at: new Date().toISOString(),
     });
     setStreamingFormData(null);
+    setStreamingFormFiles([]);
     setStreamingSources([]);
     setIsFormLoading(false);
     setIsStreaming(true);
@@ -101,6 +104,7 @@ export default function ChatPage() {
     let accumulated = "";
     let latestSources: Source[] = [];
     let latestFormData: FormDataType | null = null;
+    let latestFormFiles: FormFile[] = [];
 
     try {
       await streamChat(
@@ -114,6 +118,7 @@ export default function ChatPage() {
         },
         () => { setIsFormLoading(true); },
         (formData) => { setIsFormLoading(false); latestFormData = formData; setStreamingFormData(formData); },
+        (files) => { latestFormFiles = files; setStreamingFormFiles(files); },
         (sources) => { latestSources = sources; setStreamingSources(sources); },
         () => {
           // on done
@@ -122,7 +127,11 @@ export default function ChatPage() {
             id: assistantId,
             role: "assistant",
             content: accumulated,
-            meta: { sources: latestSources, form_data: latestFormData ?? undefined },
+            meta: {
+              sources: latestSources,
+              form_data: latestFormData ?? undefined,
+              form_files: latestFormFiles.length ? latestFormFiles : undefined,
+            },
             created_at: new Date().toISOString(),
           };
           appendMessage(finalMsg);
@@ -138,7 +147,6 @@ export default function ChatPage() {
           prev ? { ...prev, content: accumulated || "發生錯誤，請重試。" } : null
         );
       }
-      // Finalize even on error/abort
       if (accumulated || streamingFormData) {
         appendMessage({
           id: assistantId,
@@ -164,6 +172,7 @@ export default function ChatPage() {
         messages={messages}
         streamingMessage={streamingMessage}
         streamingFormData={streamingFormData}
+        streamingFormFiles={streamingFormFiles}
         streamingSources={streamingSources}
         isFormLoading={isFormLoading}
         onSuggestedQuery={handleSend}
@@ -172,7 +181,7 @@ export default function ChatPage() {
         scrollToBottomRef={scrollToBottomRef}
       />
 
-      {/* 串流中：三點動畫，可點擊 scroll 到底 */}
+      {/* 串流中：三點動畫 */}
       {showDots && (
         <div className="absolute bottom-[124px] left-1/2 -translate-x-1/2 z-20">
           <button
@@ -186,7 +195,7 @@ export default function ChatPage() {
         </div>
       )}
 
-      {/* 串流結束但未在底部：向下箭頭，可點擊 scroll 到底 */}
+      {/* 串流結束但未在底部：向下箭頭 */}
       {showArrow && (
         <div className="absolute bottom-[124px] left-1/2 -translate-x-1/2 z-20">
           <button

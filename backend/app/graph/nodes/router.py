@@ -1,8 +1,10 @@
 """
 router.py — 檢索路由節點
 
-retrieval_router：判斷當前問題是否需要從知識庫進行新的文件檢索。
-若問題屬於追問、改寫、對話延伸，可直接跳過檢索交由 responder 依對話歷史回答。
+retrieval_router：
+1. 執行靜態表單比對（form_lookup），判斷是否為明確表單下載請求
+2. 若是明確靜態表單請求 → need_retrieval=False，直接進 intent_classifier
+3. 否則判斷是否需要從知識庫進行文件檢索
 """
 
 from __future__ import annotations
@@ -12,6 +14,7 @@ from langchain_openai import ChatOpenAI
 
 from app.config import settings
 from app.graph.state import GraphState
+from app.rag.form_lookup import is_explicit_form_request, lookup_forms
 
 _ROUTER_SYSTEM = """\
 你是一位檢索決策助理，負責判斷是否需要從知識庫進行文件檢索。
@@ -29,27 +32,40 @@ _ROUTER_SYSTEM = """\
 判斷原則：若有任何不確定，輸出 YES。
 只輸出 YES 或 NO，不要輸出其他內容。"""
 
-_MAX_HISTORY_TURNS = 3  # 最多看最近 3 輪對話（6 則訊息）
+_MAX_HISTORY_TURNS = 3
 
 
 async def retrieval_router(state: GraphState) -> dict:
     """
-    判斷是否需要從知識庫檢索文件。
-    回傳 need_retrieval: True（需要）或 False（跳過）。
-
-    快速路徑：
-    - 無對話歷史（首輪）→ 直接回傳 True，省去 LLM 呼叫
+    1. 先做靜態表單比對：若使用者明確索取靜態表單 → 直接跳過檢索
+    2. 否則判斷是否需要從知識庫檢索文件
     """
-    messages = state.get("messages", [])
     query = state["query"]
 
-    # 排除當前這輪的 HumanMessage（它是 messages 的最後一則）
+    # ── 靜態表單比對（每次都跑，與 need_retrieval 無關）─────
+    matched_forms = lookup_forms(query)
+    form_explicit = is_explicit_form_request(query) if matched_forms else False
+
+    # 明確索取靜態表單 → 跳過 RAG 直接進 intent_classifier
+    if form_explicit and matched_forms:
+        return {
+            "need_retrieval": False,
+            "matched_forms": matched_forms,
+            "form_explicit": True,
+        }
+
+    # ── 以下為一般檢索路由邏輯 ────────────────────────────
+    messages = state.get("messages", [])
     prior = [m for m in messages[:-1] if isinstance(m, (HumanMessage, AIMessage))]
-    recent = prior[-(_MAX_HISTORY_TURNS * 2):]  # 最近 N 輪 = 2N 則訊息
+    recent = prior[-(_MAX_HISTORY_TURNS * 2):]
 
     # 快速路徑：沒有先前的 AI 回應 → 必須檢索
     if not any(isinstance(m, AIMessage) for m in recent):
-        return {"need_retrieval": True}
+        return {
+            "need_retrieval": True,
+            "matched_forms": matched_forms,
+            "form_explicit": False,
+        }
 
     # 組裝對話歷史供 LLM 判斷
     history_lines: list[str] = []
@@ -57,7 +73,6 @@ async def retrieval_router(state: GraphState) -> dict:
         if isinstance(msg, HumanMessage) and isinstance(msg.content, str):
             history_lines.append(f"使用者：{msg.content}")
         elif isinstance(msg, AIMessage) and isinstance(msg.content, str):
-            # 截斷長回應，避免超出 token
             history_lines.append(f"AI 助理：{msg.content[:400]}")
 
     history_text = "\n".join(history_lines)
@@ -72,6 +87,9 @@ async def retrieval_router(state: GraphState) -> dict:
         HumanMessage(content=f"對話歷史：\n{history_text}\n\n當前問題：{query}"),
     ])
 
-    # 若回應不明確，預設 YES（安全側）
     need_retrieval = "NO" not in result.content.strip().upper()
-    return {"need_retrieval": need_retrieval}
+    return {
+        "need_retrieval": need_retrieval,
+        "matched_forms": matched_forms,
+        "form_explicit": False,
+    }

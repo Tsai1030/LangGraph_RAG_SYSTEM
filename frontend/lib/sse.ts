@@ -1,5 +1,5 @@
 import { getAccessToken } from "@/store/authStore";
-import type { FormData, Source } from "@/types";
+import type { FormData, FormFile, Source } from "@/types";
 
 export async function streamChat(
   conversationId: string,
@@ -7,6 +7,7 @@ export async function streamChat(
   onText: (text: string) => void,
   onFormLoading: () => void,
   onForm: (formData: FormData) => void,
+  onFormFiles: (files: FormFile[]) => void,
   onSources: (sources: Source[]) => void,
   onDone: () => void,
   signal?: AbortSignal
@@ -56,6 +57,9 @@ export async function streamChat(
           break;
         case "form":
           onForm(event.data);
+          break;
+        case "form_files":
+          onFormFiles(event.data);
           break;
         case "sources":
           onSources(event.data);

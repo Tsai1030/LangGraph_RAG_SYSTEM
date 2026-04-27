@@ -39,10 +39,15 @@ _INTENT_SYSTEM_PROMPT = """\
 async def intent_classifier(state: GraphState) -> dict:
     """
     分類使用者意圖。
-    先用關鍵字規則，無法確定再呼叫 LLM（使用 grader_model 加速）。
+    - 靜態表單明確請求（router 已設 form_explicit=True）→ 直接回 form_request，無需 LLM
+    - 否則先用關鍵字規則，無法確定再呼叫 LLM
     """
     query = state["query"]
     query_lower = query.lower()
+
+    # 靜態表單快速路徑（router 已做 form_lookup + explicit 判斷）
+    if state.get("form_explicit") and state.get("matched_forms"):
+        return {"intent": "form_request", "form_type": None}
 
     # 快速關鍵字判斷
     if any(kw in query_lower for kw in _FORM_KEYWORDS):
