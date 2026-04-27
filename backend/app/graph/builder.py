@@ -30,7 +30,11 @@ Graph 流程：
 
 from __future__ import annotations
 
+import logging
+
 from langgraph.graph import END, START, StateGraph
+
+logger = logging.getLogger(__name__)
 
 from app.graph.nodes.compact import compact_check, summarizer
 from app.graph.nodes.context import context_builder
@@ -69,7 +73,10 @@ def _route_intent(state: GraphState) -> str:
 
 def _route_grader(state: GraphState) -> str:
     """retrieval_grader 後的條件路由：insufficient 且未超過重試上限 → 重寫查詢；其餘 → 繼續生成"""
-    if state.get("retrieval_grade") == "insufficient" and (state.get("retry_count") or 0) < _MAX_RETRIES:
+    grade = state.get("retrieval_grade")
+    retry = state.get("retry_count") or 0
+    logger.info("[route_grader] grade=%s  retry_count=%d  max=%d", grade, retry, _MAX_RETRIES)
+    if grade == "insufficient" and retry < _MAX_RETRIES:
         return "query_rewriter"
     return "intent_classifier"
 

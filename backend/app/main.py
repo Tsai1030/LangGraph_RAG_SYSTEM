@@ -1,5 +1,14 @@
+import logging
 import os
 from contextlib import asynccontextmanager
+
+_app_logger = logging.getLogger("app")
+_app_logger.setLevel(logging.INFO)
+if not _app_logger.handlers:
+    _h = logging.StreamHandler()
+    _h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    _app_logger.addHandler(_h)
+    _app_logger.propagate = False
 
 # pydantic_settings 讀取 .env 但不寫回 os.environ，LangChain 需要從 os.environ 讀取
 from app.config import settings as _s
