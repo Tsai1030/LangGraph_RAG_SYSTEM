@@ -24,12 +24,14 @@ def context_builder(state: GraphState) -> dict:
         text = chunk.get("document", "")
         meta = chunk.get("metadata", {})
 
-        # 來源標頭（幫助 LLM 理解資料來源）
+        # 來源標頭（幫助 LLM 理解資料來源與文件結構）
         header_parts: list[str] = []
         if source := meta.get("source_file"):
             header_parts.append(f"【來源：{source}】")
         if h2 := meta.get("parent_h2"):
             header_parts.append(f"【章節：{h2}】")
+        if h3 := meta.get("parent_h3"):
+            header_parts.append(f"【小節：{h3}】")
 
         if header_parts:
             text = " ".join(header_parts) + "\n" + text
