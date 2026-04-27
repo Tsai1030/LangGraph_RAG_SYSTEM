@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowUp, Route, Receipt, ShieldCheck, Building2 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -22,12 +22,10 @@ export default function NewPage() {
   const [value, setValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  useEffect(() => {
-    const el = textareaRef.current;
-    if (!el) return;
+  const autoResize = (el: HTMLTextAreaElement) => {
     el.style.height = "auto";
     el.style.height = Math.min(el.scrollHeight, 180) + "px";
-  }, [value]);
+  };
 
   const handleSend = useCallback(async (text: string) => {
     const msg = text.trim();
@@ -55,9 +53,15 @@ export default function NewPage() {
       <textarea
         ref={textareaRef}
         value={value}
-        onChange={(e) => setValue(e.target.value)}
+        onChange={(e) => {
+          setValue(e.target.value);
+          autoResize(e.target);
+        }}
         onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(value); }
+          if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            handleSend(value);
+          }
         }}
         disabled={creating}
         placeholder={placeholder}
@@ -83,7 +87,7 @@ export default function NewPage() {
     <>
       {/* ── Desktop layout ── */}
       <div className="hidden md:flex flex-col h-full items-center bg-dot-grid px-4 select-none overflow-y-auto">
-        <div className="w-full max-w-2xl flex flex-col gap-5 pt-[24vh]">
+        <div className="w-full max-w-2xl flex flex-col gap-5 mt-auto mb-auto py-[10vh]">
           {/* Brand mark */}
           <div className="flex flex-col items-center gap-3 mb-2">
             <div className="text-center">
