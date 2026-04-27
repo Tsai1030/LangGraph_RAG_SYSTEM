@@ -50,4 +50,4 @@ class GraphState(TypedDict):
     # ── CRAG 閉環控制 ─────────────────────────────────────────
     retrieval_grade: str            # 'sufficient' | 'insufficient'
     retry_count: int                # 已重試次數（上限 2）
-    rewritten_query: Optional[str] # query_rewriter 改寫後的查詢
+    retrieval_query: Optional[str]  # 檢索用查詢（rewriter 改寫後）；原始 query 永不覆寫

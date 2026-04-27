@@ -95,6 +95,8 @@ async def chat_stream(
         "token_count": 0,
         "summary": summary_text,
         "need_retrieval": True,
+        "retrieval_query": None,   # 每輪重置，避免上輪改寫結果污染本輪
+        "retry_count": 0,          # 每輪重置 CRAG 重試計數器
     }
 
     # ── 6. SSE 事件生成器 ─────────────────────────────────────

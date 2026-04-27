@@ -15,7 +15,8 @@ async def retriever(state: GraphState) -> dict:
     從 ChromaDB 搜尋與 query 相關的 chunks。
     非同步節點（ChromaDB sync 呼叫已在 vector_store 中用 asyncio.to_thread 包裝）。
     """
-    query = state["query"]
+    # 優先用 retrieval_query（rewriter 改寫版），否則用原始 query
+    query = state.get("retrieval_query") or state["query"]
     chunks = await retrieve(query, n_results=5)
 
     return {

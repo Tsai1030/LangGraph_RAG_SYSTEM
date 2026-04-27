@@ -26,20 +26,35 @@ _REWRITER_SYSTEM = """\
 
 async def retrieval_grader(state: GraphState) -> dict:
     """
-    評估目前 context 是否足以回答問題。
-    回傳 retrieval_grade: 'sufficient' | 'insufficient'
+    評估目前 retrieved_chunks 是否足以回答問題。
+    每個 chunk 取「來源標頭 + 前 300 字」，涵蓋全部 chunks 而非只看 context 前段。
     """
-    query = state.get("rewritten_query") or state["query"]
-    context = state.get("context", "")
+    query = state.get("retrieval_query") or state["query"]
+    chunks = state.get("retrieved_chunks", [])
 
-    # context 完全空白直接判 insufficient，不浪費 LLM 呼叫
-    if not context or context == "（無相關文件）":
+    if not chunks:
         return {"retrieval_grade": "insufficient"}
+
+    # 每個 chunk 取標頭 + 前 300 字，讓 grader 看到所有 chunks 的代表性內容
+    previews: list[str] = []
+    for i, chunk in enumerate(chunks[:5]):
+        meta = chunk.get("metadata", {})
+        source = meta.get("source_file", "")
+        h2 = meta.get("parent_h2", "")
+        header = f"[{i + 1}]"
+        if source:
+            header += f" 【{source}】"
+        if h2:
+            header += f"【{h2}】"
+        content = chunk.get("document", "")[:300]
+        previews.append(f"{header}\n{content}")
+
+    grader_context = "\n\n".join(previews)
 
     llm = ChatOpenAI(model=settings.grader_model, api_key=settings.openai_api_key, temperature=0)
     result = await llm.ainvoke([
         SystemMessage(content=_GRADER_SYSTEM),
-        HumanMessage(content=f"問題：{query}\n\n參考文件（前 800 字）：\n{context[:800]}"),
+        HumanMessage(content=f"問題：{query}\n\n參考文件片段（每份取前300字）：\n{grader_context}"),
     ])
 
     grade = "sufficient" if "SUFFICIENT" in result.content.upper() else "insufficient"
@@ -48,21 +63,20 @@ async def retrieval_grader(state: GraphState) -> dict:
 
 async def query_rewriter(state: GraphState) -> dict:
     """
-    將 query 改寫為更貼近文件語言的版本。
-    同時遞增 retry_count，並更新 query 供下一輪 retriever 使用。
+    將查詢改寫為更貼近文件語言的版本。
+    只寫入 retrieval_query，原始 query 永不覆寫。
     """
-    original = state.get("rewritten_query") or state["query"]
+    # 若已有改寫版本則繼續改寫，否則從原始 query 開始
+    current = state.get("retrieval_query") or state["query"]
     retry_count = state.get("retry_count") or 0
 
     llm = ChatOpenAI(model=settings.grader_model, api_key=settings.openai_api_key, temperature=0)
     result = await llm.ainvoke([
         SystemMessage(content=_REWRITER_SYSTEM),
-        HumanMessage(content=original),
+        HumanMessage(content=current),
     ])
 
-    rewritten = result.content.strip()
     return {
-        "rewritten_query": rewritten,
-        "query": rewritten,          # 更新 state["query"] 讓 retriever 直接使用
+        "retrieval_query": result.content.strip(),
         "retry_count": retry_count + 1,
     }

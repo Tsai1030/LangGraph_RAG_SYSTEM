@@ -18,6 +18,13 @@ from app.config import settings
 from app.api import auth, conversations, chat, export
 from app.graph.builder import build_graph
 
+from pathlib import Path
+
+def _resolve_chroma_path() -> str:
+    if settings.chroma_active_version:
+        return str(Path(settings.chroma_versions_path) / settings.chroma_active_version)
+    return settings.chroma_persist_path
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -31,6 +38,17 @@ async def lifespan(app: FastAPI):
         checkpointer = AsyncSqliteSaver(conn)
         await checkpointer.setup()                   # 建立 langgraph.db 所需 tables
         app.state.graph = build_graph(checkpointer=checkpointer)
+
+        print(f"[Startup] APP_ENV={settings.app_env}")
+        print(f"[Startup] DATABASE_URL={settings.database_url}")
+        print(f"[Startup] LANGGRAPH_DB_PATH={settings.langgraph_db_path}")
+        print(f"[Startup] CHROMA_ACTIVE_VERSION={settings.chroma_active_version or '(default)'}")
+        print(f"[Startup] RESOLVED_CHROMA_PATH={_resolve_chroma_path()}")
+        print(f"[Startup] LLM_MODEL={settings.llm_model}")
+        print(f"[Startup] GRADER_MODEL={settings.grader_model}")
+        print(f"[Startup] FORM_MODEL={settings.form_model}")
+        print(f"[Startup] EMBEDDING_MODEL={settings.embedding_model}")
+
         yield
     # yield 結束（server 關閉）後，async with 自動關閉 conn
 

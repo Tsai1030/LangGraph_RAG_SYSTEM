@@ -243,6 +243,11 @@ server {
         chunked_transfer_encoding on;
         proxy_read_timeout 300s;
 
+        # 告知下游任何 nginx / CDN 不要 buffer（response header）
+        add_header         X-Accel-Buffering no;
+        # 送給後端，讓後端可選擇性地帶回同名 response header
+        proxy_set_header   X-Accel-Buffering no;
+
         proxy_set_header Host              $host;
         proxy_set_header X-Real-IP         $remote_addr;
         proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;

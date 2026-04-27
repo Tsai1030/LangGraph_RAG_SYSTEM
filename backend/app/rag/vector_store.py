@@ -88,7 +88,7 @@ async def get_embedding(text: str) -> list[float]:
 
 async def search(
     query: str,
-    n_results: int = 5,
+    n_results: int = 8,
     where: dict | None = None,
 ) -> list[dict[str, Any]]:
     """
