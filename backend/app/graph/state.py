@@ -51,3 +51,5 @@ class GraphState(TypedDict):
     retrieval_grade: str            # 'sufficient' | 'insufficient'
     retry_count: int                # 已重試次數（上限 2）
     retrieval_query: Optional[str]  # 檢索用查詢（rewriter 改寫後）；原始 query 永不覆寫
+    grader_reason: Optional[str]             # grader 的判斷依據
+    grader_missing_information: Optional[str]  # grader 指出缺少的資訊（供 rewriter 參考）
