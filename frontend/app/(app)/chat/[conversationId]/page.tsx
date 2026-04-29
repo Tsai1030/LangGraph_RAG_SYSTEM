@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
+import { useAuthStore } from "@/store/authStore";
 import { ArrowDown } from "lucide-react";
 import api from "@/lib/api";
 import { streamChat } from "@/lib/sse";
@@ -12,6 +13,7 @@ import type { MessageOut, FormData as FormDataType, FormFile, Source, Conversati
 
 export default function ChatPage() {
   const { conversationId } = useParams<{ conversationId: string }>();
+  const router = useRouter();
   const { setCurrentMessages, appendMessage, pendingMessage, setPendingMessage, conversations, updateConversationTitle } = useChatStore();
 
   const [loading, setLoading] = useState(true);
@@ -142,23 +144,25 @@ export default function ChatPage() {
         controller.signal
       );
     } catch (err: unknown) {
-      if (err instanceof Error && err.name !== "AbortError") {
-        setStreamingMessage((prev) =>
-          prev ? { ...prev, content: accumulated || "發生錯誤，請重試。" } : null
-        );
+      setStreamingMessage(null);
+      setIsStreaming(false);
+      abortRef.current = null;
+
+      if (err instanceof Error && err.message === "UNAUTHORIZED") {
+        useAuthStore.getState().clearAuth();
+        router.push("/login");
+        return;
       }
-      if (accumulated || streamingFormData) {
+
+      if (err instanceof Error && err.name !== "AbortError") {
         appendMessage({
           id: assistantId,
           role: "assistant",
-          content: accumulated,
+          content: accumulated || "發生錯誤，請重試。",
           meta: null,
           created_at: new Date().toISOString(),
         });
       }
-      setStreamingMessage(null);
-      setIsStreaming(false);
-      abortRef.current = null;
     }
   }, [conversationId, isStreaming, appendMessage, streamingFormData, streamingSources]); // eslint-disable-line react-hooks/exhaustive-deps
 

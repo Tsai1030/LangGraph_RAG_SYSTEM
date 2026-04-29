@@ -1,5 +1,17 @@
-import { getAccessToken } from "@/store/authStore";
+import { getAccessToken, useAuthStore } from "@/store/authStore";
 import type { FormData, FormFile, Source } from "@/types";
+
+async function attemptTokenRefresh(): Promise<string> {
+  const res = await fetch("/api/auth/refresh", {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!res.ok) throw new Error("UNAUTHORIZED");
+  const data = await res.json();
+  const newToken: string = data.access_token;
+  useAuthStore.getState().setAccessToken(newToken);
+  return newToken;
+}
 
 export async function streamChat(
   conversationId: string,
@@ -12,19 +24,33 @@ export async function streamChat(
   onDone: () => void,
   signal?: AbortSignal
 ): Promise<void> {
-  const token = getAccessToken();
+  let token = getAccessToken();
 
   // 直連後端，繞過 Next.js rewrites 的 response buffering
   const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
-  const response = await fetch(`${backendUrl}/api/chat/stream`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify({ conversation_id: conversationId, message }),
-    signal,
-  });
+
+  const doFetch = (t: string | null) =>
+    fetch(`${backendUrl}/api/chat/stream`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(t ? { Authorization: `Bearer ${t}` } : {}),
+      },
+      body: JSON.stringify({ conversation_id: conversationId, message }),
+      signal,
+    });
+
+  let response = await doFetch(token);
+
+  // Token 過期 → 嘗試 refresh 一次
+  if (response.status === 401) {
+    try {
+      token = await attemptTokenRefresh();
+    } catch {
+      throw new Error("UNAUTHORIZED");
+    }
+    response = await doFetch(token);
+  }
 
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}`);
