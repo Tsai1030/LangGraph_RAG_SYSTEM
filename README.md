@@ -27,12 +27,13 @@
 
 ```
 使用者 → 前端 (Next.js) → FastAPI → LangGraph
-                                       ├─ Adaptive 檢索路由（跳過不必要的向量搜尋）
-                                       ├─ Hybrid RAG（ChromaDB + BM25 + RRF）
-                                       ├─ CRAG 閉環修正（retrieval grader + query rewriter）
-                                       ├─ 意圖分類（qa / form_request）
+                                       ├─ Adaptive 檢索路由（LLM structured output RouterDecision）
+                                       ├─ 兩層 Hybrid RAG（intra-query: Vector+BM25 RRF；inter-query: rewrite RRF）
+                                       ├─ CRAG 閉環修正（GraderOutput + query rewriter，上限 2 次）
+                                       ├─ 意圖分類（qa / form_request，多重 fast-path）
                                        ├─ 回覆生成（串流 SSE）
-                                       ├─ 表單生成（Function Calling + Pydantic）
+                                       ├─ 靜態表單 Registry（關鍵字比對 + 認證下載）
+                                       ├─ 動態表單生成（Function Calling + Pydantic + 多輪延續）
                                        └─ Token-based 記憶壓縮
                                    ↓
                               SQLite (對話記錄 + 摘要)
@@ -129,7 +130,7 @@ class GraphState(TypedDict):
 
     # 生成結果
     response: str
-    form_data: Optional[dict]      # 結構化表單 JSON
+    form_data: Optional[dict]      # 動態生成的結構化表單 JSON
 
     # Compact 控制
     is_compact_needed: bool
@@ -142,7 +143,17 @@ class GraphState(TypedDict):
     # CRAG 閉環控制
     retrieval_grade: str           # 'sufficient' | 'insufficient'
     retry_count: int               # 已重試次數（上限 2）
-    rewritten_query: Optional[str] # query_rewriter 改寫後的查詢
+    retrieval_query: Optional[str] # query_rewriter 或 router 設定的改寫查詢
+    grader_reason: Optional[str]             # grader 的判斷依據
+    grader_missing_information: Optional[str]  # grader 指出的缺漏資訊（供 rewriter 參考）
+
+    # 靜態表單 Registry
+    matched_forms: list[dict]      # [{form_id, display_name, download_url}]
+    form_explicit: bool            # True = 使用者明確索取靜態表單檔案
+
+    # 多輪表單延續
+    is_form_continuation: bool     # True = router 判定為延續上一輪表單
+    prev_form_data: Optional[dict] # 最近一輪生成的表單（避免重複、保持格式一致）
 ```
 
 ### 流程圖
@@ -153,22 +164,26 @@ START
         ├─ token > 8000 ──► summarizer（壓縮舊訊息 → 生成摘要）─┐
         └─ token ≤ 8000 ──────────────────────────────────────┘
                                                                ▼
-                                                   retrieval_router（LLM 判斷是否需要檢索）
+                                                   retrieval_router（LLM → RouterDecision JSON）
+                                                    ├─ form_explicit=True ──────────────────────────────────────► intent_classifier
                                                     ├─ need_retrieval=True ──► retriever（Hybrid RAG）
+                                                    │    is_form_continuation=True 時附帶 retrieval_topic
                                                     │                               ↓
                                                     │                        context_builder
                                                     │                               ↓
-                                                    │                        retrieval_grader ◄──────────────┐
-                                                    │                         ├─ sufficient ────────────────►│
-                                                    │                         │                              │ (loop ≤ 2)
-                                                    │                         └─ insufficient ─► query_rewriter ─┘
+                                                    │                        retrieval_grader（GraderOutput）◄──────────┐
+                                                    │                         ├─ sufficient ──────────────────────────►│
+                                                    │                         │                                        │ (loop ≤ 2)
+                                                    │                         └─ insufficient ─► query_rewriter ───────┘
                                                     │                               ↓（sufficient 或超過重試上限）
                                                     └─ need_retrieval=False ─► intent_classifier
-                                                                               ├─ form_request（無 chunks）─► retriever（補做）
-                                                                               ├─ form_request（有 chunks）─► form_structurer ─► responder
-                                                                               └─ qa ───────────────────────────────────────► responder
-                                                                                                                                  ↓
-                                                                                                                                 END
+                                                                               ├─ form_explicit + matched_forms ─► responder（靜態下載）
+                                                                               ├─ is_form_continuation ──────────► form_structurer ─► responder
+                                                                               ├─ form_request（有 chunks）────── ─► form_structurer ─► responder
+                                                                               ├─ form_request（無 chunks）────── ─► retriever（補做）
+                                                                               └─ qa ────────────────────────────► responder
+                                                                                                                        ↓
+                                                                                                                       END
 ```
 
 ### 節點說明
@@ -177,14 +192,14 @@ START
 |------|------|------|------|
 | `compact_check` | 同步 | — | tiktoken 計算 token 數，判斷是否超過 8000 token 閾值 |
 | `summarizer` | 非同步 | llm_model | 保留最近 8 則訊息，壓縮舊訊息為 300 字摘要，RemoveMessage 刪除舊訊息 |
-| `retrieval_router` | 非同步 | grader_model | LLM 判斷是否需要知識庫檢索；首輪對話直接回傳 True 不呼叫 LLM |
-| `retriever` | 非同步 | — | Hybrid 搜尋（向量 top-20 + BM25 top-20），RRF 融合後回傳 top-8 |
-| `context_builder` | 同步 | — | 將 chunks 格式化為 LLM 可讀的 context string，注入 Markdown 圖片語法 |
-| `retrieval_grader` | 非同步 | grader_model | 評估 context 是否足以回答問題，輸出 sufficient / insufficient |
-| `query_rewriter` | 非同步 | grader_model | 將 query 改寫為更貼近文件語言的版本，遞增 retry_count |
-| `intent_classifier` | 非同步 | grader_model | 關鍵字快速判斷，模糊時 LLM 語意分類（偏向 form_request） |
-| `form_structurer` | 非同步 | form_model | Function Calling + Pydantic 生成結構化 JSON 表單 |
-| `responder` | 非同步 | llm_model | ChatOpenAI streaming=True，astream_events 捕捉逐 token 推送 SSE |
+| `retrieval_router` | 非同步 | grader_model | LLM structured output（RouterDecision）：一次判斷 need_retrieval + is_form_continuation + retrieval_topic；同時執行靜態表單 form_lookup |
+| `retriever` | 非同步 | — | 雙路平行 Hybrid 搜尋，若有 retrieval_query 則兩路 RRF 融合（inter-query RRF）；單路為 intra-query RRF（Vector+BM25） |
+| `context_builder` | 同步 | — | 將 chunks 格式化為 LLM 可讀的 context string，注入來源標頭與 Markdown 圖片語法 |
+| `retrieval_grader` | 非同步 | grader_model | structured output（GraderOutput）評估 context 品質，回傳 decision / reason / missing_information |
+| `query_rewriter` | 非同步 | grader_model | 依 missing_information 將 query 改寫為更貼近文件語言的版本，遞增 retry_count |
+| `intent_classifier` | 非同步 | grader_model | 三重 fast-path（form_explicit / is_form_continuation / 關鍵字），模糊時 LLM 語意分類 |
+| `form_structurer` | 非同步 | form_model | Function Calling + Pydantic 生成結構化 JSON 表單；注入 prev_form_data 避免多輪重複 |
+| `responder` | 非同步 | llm_model | 靜態表單輸出短句確認；動態表單輸出說明文字；QA 串流完整回覆；astream_events 捕捉逐 token 推送 SSE |
 
 ### 條件路由
 
@@ -209,23 +224,46 @@ def _route_intent(state):
 
 ### Adaptive 檢索路由
 
-`retrieval_router` 使用 `grader_model` 做二元 YES/NO 判斷，決定是否跳過知識庫檢索：
+`retrieval_router` 使用 `grader_model` 搭配 Pydantic structured output（`RouterDecision`），一次 LLM 呼叫同時判斷三個維度：
 
-**需要檢索（YES）：** 詢問技術規範、法規、施工流程、請求生成表單、問及新主題
+```python
+class RouterDecision(BaseModel):
+    need_retrieval: bool          # 是否需要知識庫檢索
+    is_form_continuation: bool   # 是否為延續上一輪表單生成
+    retrieval_topic: Optional[str] # 延續時的檢索主題詞
+    reason: str                  # 判斷依據（LangSmith 可觀測）
+```
 
-**可跳過（NO）：** 追問改寫前一輪回答、對前一輪細節的延伸問題、致謝純確認
+**need_retrieval=True：** 詢問技術規範、法規、施工流程、請求生成表單、問及新主題
+
+**need_retrieval=False：** 改寫前一輪回答、對前一輪細節追問、致謝確認
+
+**is_form_continuation=True（需同時滿足）：**
+- 使用者想繼續/增加表單內容（如「再生成五組」「多出幾題」）
+- 前一輪確實生成過表單（`prev_form_data` 不為 None）
+- 設定 `retrieval_query = retrieval_topic`，讓 retriever 搜尋正確主題
 
 **安全設計：**
-- 首輪對話（無 AI 回應歷史）→ 跳過 LLM 呼叫，直接回傳 True
-- LLM 回應不明確（非 YES/NO）→ 預設 True（安全側）
-- skip 路徑若遇到 form_request → `_route_intent` 自動補做 `retriever`
+- 首輪對話（無 AI 回應歷史）→ 跳過 LLM 呼叫，直接回傳 `need_retrieval=True`
+- 靜態表單比對（form_lookup）優先於 LLM 路由，命中時直接設 `form_explicit=True`
+- skip 路徑若遇到 form_request 且無 chunks → `_route_intent` 自動補做 `retriever`
 
 ### CRAG 閉環修正
 
-`retrieval_grader` 在取得 context 後評估品質：
+`retrieval_grader` 使用 structured output（`GraderOutput`）評估 context 品質：
+
+```python
+class GraderOutput(BaseModel):
+    decision: Literal["sufficient", "insufficient"]
+    reason: str                  # 判斷依據
+    missing_information: str     # 缺少的資訊描述（供 query_rewriter 參考）
+```
+
 - **sufficient**：context 足以回答 → 繼續 `intent_classifier`
-- **insufficient**：context 不足 → `query_rewriter` 改寫查詢 → 重新 `retriever`
+- **insufficient**：context 不足 → `query_rewriter` 依 `missing_information` 改寫查詢 → 重新 `retriever`
 - 最多重試 **2 次**（超過上限強制繼續，避免無限循環）
+
+**Inter-query RRF：** 當 `retrieval_query` 與 `query` 不同時，`retriever` 平行搜尋兩個 query，結果再做一次 RRF 融合，同時出現在兩組結果的 chunk 自動加分。
 
 ### CheckPointer（短期記憶持久化）
 
@@ -238,16 +276,22 @@ def _route_intent(state):
 
 ## RAG 檢索設計
 
-### Hybrid Search 架構
+### Hybrid Search 架構（兩層 RRF）
 
 ```
-query
-  ├─ OpenAI Embedding → ChromaDB 向量搜尋（top-20）
-  └─ jieba 分詞 → BM25 關鍵字搜尋（top-20）
-        ↓
-   RRF（Reciprocal Rank Fusion，k=60）
-        ↓
-   merged top-8 chunks
+                    ┌─ query ─────────────────────────────────────────────┐
+                    │                                                     │ （CRAG rewrite 或 form continuation 時）
+                    ▼                                                     ▼
+  intra-query RRF（每個 query 各自執行）               retrieval_query（改寫版或主題詞）
+    ├─ OpenAI Embedding → ChromaDB 向量搜尋（top-20）      同樣執行 intra-query RRF → top-8
+    └─ jieba 分詞 → BM25 關鍵字搜尋（top-20）
+          ↓
+     RRF 融合 → top-8 chunks
+                    │                                                     │
+                    └──────────────── inter-query RRF ───────────────────┘
+                                              ↓
+                                        merged top-8 chunks
+                         （同時出現在兩組結果的 chunk 自動加分）
 ```
 
 ### 向量搜尋
@@ -342,14 +386,36 @@ class FormSchema(BaseModel):
 
 **rows 設計為 `list[str]`（pipe-separated）而非 `list[dict]`**，原因是 `list[dict[str, str]]` 在 JSON Schema 中產生 `additionalProperties`，導致模型略過該欄位。Python 側再轉換為 `list[dict[str, str]]` 供前端使用。
 
+### 靜態表單 Registry
+
+`data_markdown/form_data/` 存放預建的 `.docx` 表單範本，由 `form_registry.json` 管理：
+- **關鍵字比對**：`lookup_forms(query)` 依 tags 匹配，回傳 `matched_forms`
+- **明確請求偵測**：`is_explicit_form_request(query)` 檢查動詞（下載、給我）+ 名詞（表單、表格）
+- **認證下載端點**：`GET /api/forms/{form_id}/download`，需 Bearer token，回傳 FileResponse
+
+### 動態表單多輪延續
+
+跨對話輪次保持表單一致性：
+- `prev_form_data`：chat.py 每輪從 checkpointer 讀取前一輪（或更早）的 form_data，不中斷鏈
+- `is_form_continuation`：router LLM 判定延續請求時設為 True，intent_classifier 直接 fast-path 為 form_request
+- `form_structurer` prompt 注入 prev_form_data 的標題、欄位與前幾列範例，避免重複生成相同內容
+
 ### SSE 表單事件流程
 
 ```
-form_loading  ← form_structurer 開始執行，前端顯示「表單生成中...」
+（動態表單）
+form_loading  ← form_structurer 開始執行，前端顯示骨架動畫 + 輪播文字
     ↓
-（text tokens 串流，responder 輸出一句確認文字）
+text tokens   ← responder 輸出確認文字
     ↓
-form          ← graph 完成後由 aget_state() 讀取，一次性推送完整 JSON
+form          ← graph 完成後推送完整 FormData JSON
+    ↓
+done
+
+（靜態表單）
+text tokens   ← responder 輸出「《表單名稱》，請點擊下方下載。」
+    ↓
+form_files    ← 推送 [{form_id, display_name, download_url}]
     ↓
 done
 ```
@@ -451,9 +517,10 @@ GET  /api/images/{filename}   # 取得知識庫圖片
 **事件格式：**
 ```
 {"type": "text",         "content": "..."}  # 逐 token 串流文字
-{"type": "form_loading"}                    # 表單生成開始（前端顯示 loading）
+{"type": "form_loading"}                    # 動態表單生成開始（前端顯示骨架動畫）
 {"type": "sources",      "data": [...]}     # 參考來源（一次性）
-{"type": "form",         "data": {...}}     # 完整表單 JSON（一次性）
+{"type": "form",         "data": {...}}     # 動態表單完整 JSON（一次性）
+{"type": "form_files",   "data": [...]}     # 靜態表單下載卡片 [{form_id, display_name, download_url}]
 {"type": "error",        "content": "..."}  # 錯誤訊息
 {"type": "done"}                            # 串流結束
 ```
@@ -605,7 +672,9 @@ backend/app/
 │   └── summary.py
 ├── rag/
 │   ├── vector_store.py      # ChromaDB + OpenAI embedding（async 包裝）
-│   ├── retriever.py         # Hybrid BM25 + Vector + RRF
+│   ├── retriever.py         # Hybrid BM25 + Vector + intra/inter-query RRF
+│   ├── form_registry.json   # 靜態表單 Registry（form_id / keywords / download_url）
+│   ├── form_lookup.py       # 靜態表單比對與明確請求偵測
 │   └── jieba_dict.txt       # 4,948 個營造業自訂詞典
 ├── services/
 │   └── conversation_service.py  # CRUD + upsert_summary + get_summary

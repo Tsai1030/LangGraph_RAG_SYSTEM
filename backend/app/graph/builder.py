@@ -7,25 +7,26 @@ Graph 流程：
           ├─ is_compact_needed=True  ─► summarizer ─┐
           └─ is_compact_needed=False ───────────────┘
                                                      ▼
-                                           retrieval_router
-                                            ├─ need_retrieval=True  ─► retriever
+                                           retrieval_router（LLM structured output: RouterDecision）
+                                            ├─ form_explicit=True ─────────────────────────────────────────────► intent_classifier
+                                            ├─ need_retrieval=True ─► retriever
+                                            │    （is_form_continuation=True 時附帶 retrieval_topic 作為 retrieval_query）
                                             │                               │
                                             │                         context_builder
                                             │                               │
-                                            │                        retrieval_grader  ◄─────────────────┐
-                                            │                         ├─ sufficient ───────────────────► │
-                                            │                         │                                  │ (loop, max 2)
-                                            │                         └─ insufficient ─► query_rewriter ─┘
-                                            │                               │ (sufficient OR max retries)
-                                            │                         intent_classifier
-                                            │                          ├─ form_request ─► form_structurer ─► responder
-                                            │                          └─ qa ───────────────────────────── ─► responder
+                                            │                        retrieval_grader（GraderOutput: decision/reason/missing）
+                                            │                         ├─ sufficient ─────────────────────────────────────────────► │
+                                            │                         │                                                            │ (loop ≤ 2)
+                                            │                         └─ insufficient ─► query_rewriter ──────────────────────────┘
+                                            │                               │ (sufficient OR 超過重試上限)
                                             └─ need_retrieval=False ─► intent_classifier
+                                                                          ├─ form_explicit + matched_forms → form_request ─► responder（靜態下載）
+                                                                          ├─ is_form_continuation → form_request ─► form_structurer ─► responder
+                                                                          ├─ form_request（有 chunks）──────────── ─► form_structurer ─► responder
                                                                           ├─ form_request（無 chunks）─► retriever（補做）
-                                                                          ├─ form_request（有 chunks）─► form_structurer
-                                                                          └─ qa ──────────────────────► responder
-                                                                                                           │
-                                                                                                          END
+                                                                          └─ qa ──────────────────────────────────────────────────► responder
+                                                                                                                                       │
+                                                                                                                                      END
 """
 
 from __future__ import annotations
