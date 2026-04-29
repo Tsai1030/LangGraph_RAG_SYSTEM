@@ -77,11 +77,43 @@ function createMarkdownComponents(onImageClick: (src: string, alt: string) => vo
   };
 }
 
+const FORM_LOADING_MESSAGES = [
+  "正在分析表單需求...",
+  "正在生成輸入欄位...",
+  "正在套用樣式設定...",
+  "即將完成...",
+];
+
 function FormLoadingCard() {
+  const [index, setIndex] = useState(0);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setIndex((prev) => (prev + 1) % FORM_LOADING_MESSAGES.length);
+    }, 2500);
+    return () => clearInterval(timer);
+  }, []);
+
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 mb-3">
-      <div className="size-4 shrink-0 rounded-full border-2 border-zinc-400 border-t-transparent animate-spin" />
-      <span className="text-sm text-zinc-500">表單生成中...</span>
+    <div className="w-full rounded-xl border border-zinc-200 bg-white p-4 mb-3 shadow-sm">
+      <div className="flex items-center gap-3 mb-4 pb-3 border-b border-zinc-100">
+        <div className="size-4 shrink-0 rounded-full border-2 border-zinc-200 border-t-zinc-500 animate-spin" />
+        <div className="h-5 overflow-hidden flex-1 relative">
+          <span key={index} className="absolute text-sm font-medium text-zinc-500 animate-slide-up">
+            {FORM_LOADING_MESSAGES[index]}
+          </span>
+        </div>
+      </div>
+      <div className="space-y-4 animate-pulse">
+        <div className="flex items-center gap-3">
+          <div className="h-4 w-24 rounded bg-zinc-200" />
+        </div>
+        <div className="h-10 w-full rounded-lg bg-zinc-100" />
+        <div className="flex items-center gap-2">
+          <div className="size-4 rounded-full bg-zinc-200" />
+          <div className="h-3 w-48 rounded bg-zinc-100" />
+        </div>
+      </div>
     </div>
   );
 }
