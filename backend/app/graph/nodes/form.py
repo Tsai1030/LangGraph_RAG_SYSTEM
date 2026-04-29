@@ -65,7 +65,10 @@ async def form_structurer(state: GraphState) -> dict:
     """
     根據 context 和 query 生成結構化表單。
     rows 以 pipe-separated 字串回傳，Python 側轉換為 dict 格式。
+    若有 prev_form_data，告知 LLM 前輪結果以避免重複並保持格式一致。
     """
+    import json as _json
+
     llm = ChatOpenAI(
         model=settings.form_model,
         api_key=settings.openai_api_key,
@@ -73,8 +76,21 @@ async def form_structurer(state: GraphState) -> dict:
     ).with_structured_output(FormSchema, method="function_calling")
 
     context = state.get("context", "")
+    prev_form_data = state.get("prev_form_data")
+
+    prev_hint = ""
+    if prev_form_data:
+        prev_rows = prev_form_data.get("rows", [])
+        prev_hint = (
+            f"\n\n【前一輪已生成的表單】（請勿重複相同內容，但保持相同 form_type、columns 格式與主題）：\n"
+            f"標題：{prev_form_data.get('title', '')}\n"
+            f"欄位：{prev_form_data.get('columns', [])}\n"
+            f"已有 {len(prev_rows)} 列資料，以下為前幾列範例：\n"
+            + _json.dumps(prev_rows[:3], ensure_ascii=False)
+        )
+
     user_content = (
-        f"使用者需求：{state['query']}\n\n"
+        f"使用者需求：{state['query']}{prev_hint}\n\n"
         f"參考文件：\n{context[:_FORM_CONTEXT_LIMIT]}"
     )
 

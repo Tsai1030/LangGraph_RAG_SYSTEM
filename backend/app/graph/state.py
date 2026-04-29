@@ -57,3 +57,7 @@ class GraphState(TypedDict):
     # ── 靜態表單 ──────────────────────────────────────────────
     matched_forms: list[dict]       # registry 匹配的靜態表單 [{form_id, display_name, download_url}]
     form_explicit: bool             # True = 使用者明確索取表單檔案（直接下載），False = 主題相關詢問
+
+    # ── 多輪表單延續 ───────────────────────────────────────────
+    prev_form_data: Optional[dict]  # 最近一輪生成的表單（供延續生成時避免重複、保持格式一致）
+    is_form_continuation: bool      # True = router 判定為延續上一輪表單，intent 直接 fast-path

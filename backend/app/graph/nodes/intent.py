@@ -49,6 +49,10 @@ async def intent_classifier(state: GraphState) -> dict:
     if state.get("form_explicit") and state.get("matched_forms"):
         return {"intent": "form_request", "form_type": None}
 
+    # 延續表單快速路徑（router LLM 已判定為 form continuation）
+    if state.get("is_form_continuation"):
+        return {"intent": "form_request", "form_type": None}
+
     # 快速關鍵字判斷
     if any(kw in query_lower for kw in _FORM_KEYWORDS):
         return {"intent": "form_request", "form_type": None}

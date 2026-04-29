@@ -79,6 +79,19 @@ async def chat_stream(
     graph = request.app.state.graph
     config = {"configurable": {"thread_id": conversation_id}}
 
+    # 讀取最近一輪有生成過的 form_data（供多輪表單延續使用）
+    # 若上一輪沒有 form（form_data=None），繼續往前找 prev_form_data，避免斷鏈
+    prev_form_data = None
+    try:
+        prev_state = await graph.aget_state(config)
+        if prev_state and prev_state.values:
+            prev_form_data = (
+                prev_state.values.get("form_data")
+                or prev_state.values.get("prev_form_data")
+            )
+    except Exception:
+        pass
+
     initial_state = {
         "conversation_id": conversation_id,
         "user_id": user_id,
@@ -101,6 +114,8 @@ async def chat_stream(
         "grader_missing_information": None,
         "matched_forms": [],              # 靜態表單匹配結果
         "form_explicit": False,           # 是否為明確表單下載請求
+        "is_form_continuation": False,    # 每輪重置，由 router 重新判斷
+        "prev_form_data": prev_form_data, # 最近一輪有 form 的資料（多輪延續用）
     }
 
     # ── 6. SSE 事件生成器 ─────────────────────────────────────
