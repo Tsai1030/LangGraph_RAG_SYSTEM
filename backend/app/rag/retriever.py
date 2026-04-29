@@ -42,7 +42,7 @@ async def _ensure_bm25() -> None:
         _bm25 = BM25Okapi([_tokenize(d["document"]) for d in docs])
 
 
-def _rrf(
+def rrf(
     vector_hits: list[dict],
     bm25_hits: list[dict],
     k: int = 60,
@@ -94,7 +94,7 @@ async def retrieve(
         if bm25_scores[i] > 0
     ]
 
-    merged = _rrf(vector_hits, bm25_hits)
+    merged = rrf(vector_hits, bm25_hits)
     return merged[:n_results]
 
 
