@@ -14,8 +14,9 @@ chat.py — SSE 聊天端點
 
 from __future__ import annotations # python 未來性設定，型別註記處理會更彈性
 
+import asyncio
 import json # 把dict轉成json因為sse stream
-from typing import AsyncGenerator  
+from typing import AsyncGenerator
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
@@ -33,6 +34,8 @@ from app.services.conversation_service import (
 )
 
 router = APIRouter(prefix="/chat", tags=["chat"])
+
+_chat_semaphore = asyncio.Semaphore(20)
 
 
 @router.post("/stream")
@@ -64,6 +67,14 @@ async def chat_stream(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Conversation not found",
         )
+
+    # ── 1.5 系統容量檢查 ──────────────────────────────────────
+    if _chat_semaphore.locked():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="系統目前繁忙，請稍後再試",
+        )
+    await _chat_semaphore.acquire()
 
     # ── 2. 儲存使用者訊息 ─────────────────────────────────────
     await save_message(db, conversation_id, "user", body.message)
@@ -125,82 +136,86 @@ async def chat_stream(
         final_values: dict = {}  # 提前初始化，避免後續 NameError
 
         try:
-            async for event in graph.astream_events(
-                initial_state, config, version="v2"
-            ):
-                event_type = event.get("event", "")
-                event_name = event.get("name", "")
-                node_name = event.get("metadata", {}).get("langgraph_node", "")
+            try:
+                async for event in graph.astream_events(
+                    initial_state, config, version="v2"
+                ):
+                    event_type = event.get("event", "")
+                    event_name = event.get("name", "")
+                    node_name = event.get("metadata", {}).get("langgraph_node", "")
 
-                # form_structurer 開始 → 前端顯示「表單生成中」
-                if event_type == "on_chain_start" and event_name == "form_structurer":
-                    yield (
-                        f"data: {json.dumps({'type': 'form_loading'})}\n\n"
-                    )
-
-                # 捕捉 responder 節點的串流 token
-                if event_type == "on_chat_model_stream" and node_name == "responder":
-                    chunk = event["data"].get("chunk")
-                    if chunk and hasattr(chunk, "content") and chunk.content:
-                        assistant_response += chunk.content
+                    # form_structurer 開始 → 前端顯示「表單生成中」
+                    if event_type == "on_chain_start" and event_name == "form_structurer":
                         yield (
-                            f"data: {json.dumps({'type': 'text', 'content': chunk.content}, ensure_ascii=False)}\n\n"
+                            f"data: {json.dumps({'type': 'form_loading'})}\n\n"
                         )
 
-        except Exception as exc:
-            had_error = True
-            yield (
-                f"data: {json.dumps({'type': 'error', 'content': str(exc)}, ensure_ascii=False)}\n\n"
-            )
+                    # 捕捉 responder 節點的串流 token
+                    if event_type == "on_chat_model_stream" and node_name == "responder":
+                        chunk = event["data"].get("chunk")
+                        if chunk and hasattr(chunk, "content") and chunk.content:
+                            assistant_response += chunk.content
+                            yield (
+                                f"data: {json.dumps({'type': 'text', 'content': chunk.content}, ensure_ascii=False)}\n\n"
+                            )
 
-        # ── 7. graph 完成後：讀取最終狀態，推送 sources / form ────
-        if not had_error:
-            try:
-                final = await graph.aget_state(config)
-                final_values = final.values if final else {}
-            except Exception:
-                pass  # 讀取失敗保留空 dict，不影響已串流文字
-
-            sources = final_values.get("sources", [])
-            if sources:
+            except Exception as exc:
+                had_error = True
                 yield (
-                    f"data: {json.dumps({'type': 'sources', 'data': sources}, ensure_ascii=False)}\n\n"
+                    f"data: {json.dumps({'type': 'error', 'content': str(exc)}, ensure_ascii=False)}\n\n"
                 )
 
-            form_data = final_values.get("form_data")
-            if form_data:
-                yield (
-                    f"data: {json.dumps({'type': 'form', 'data': form_data}, ensure_ascii=False)}\n\n"
-                )
+            # ── 7. graph 完成後：讀取最終狀態，推送 sources / form ────
+            if not had_error:
+                try:
+                    final = await graph.aget_state(config)
+                    final_values = final.values if final else {}
+                except Exception:
+                    pass  # 讀取失敗保留空 dict，不影響已串流文字
 
-            matched_forms = final_values.get("matched_forms", [])
-            if matched_forms:
-                yield (
-                    f"data: {json.dumps({'type': 'form_files', 'data': matched_forms}, ensure_ascii=False)}\n\n"
-                )
-
-        yield f"data: {json.dumps({'type': 'done'})}\n\n"
-
-        # ── 8. 儲存 AI 回覆至 app.db ──────────────────────────
-        if assistant_response:
-            try:
-                async with AsyncSessionLocal() as save_db:
-                    meta: dict = {}
-                    if final_values.get("sources"):
-                        meta["sources"] = final_values["sources"]
-                    if final_values.get("form_data"):
-                        meta["form_data"] = final_values["form_data"]
-                    if final_values.get("matched_forms"):
-                        meta["form_files"] = final_values["matched_forms"]
-                    await save_message(
-                        save_db,
-                        conversation_id,
-                        "assistant",
-                        assistant_response,
-                        metadata=meta or None,
+                sources = final_values.get("sources", [])
+                if sources:
+                    yield (
+                        f"data: {json.dumps({'type': 'sources', 'data': sources}, ensure_ascii=False)}\n\n"
                     )
-            except Exception:
-                pass  # 儲存失敗不影響已完成的串流
+
+                form_data = final_values.get("form_data")
+                if form_data:
+                    yield (
+                        f"data: {json.dumps({'type': 'form', 'data': form_data}, ensure_ascii=False)}\n\n"
+                    )
+
+                matched_forms = final_values.get("matched_forms", [])
+                if matched_forms:
+                    yield (
+                        f"data: {json.dumps({'type': 'form_files', 'data': matched_forms}, ensure_ascii=False)}\n\n"
+                    )
+
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+            # ── 8. 儲存 AI 回覆至 app.db ──────────────────────────
+            if assistant_response:
+                try:
+                    async with AsyncSessionLocal() as save_db:
+                        meta: dict = {}
+                        if final_values.get("sources"):
+                            meta["sources"] = final_values["sources"]
+                        if final_values.get("form_data"):
+                            meta["form_data"] = final_values["form_data"]
+                        if final_values.get("matched_forms"):
+                            meta["form_files"] = final_values["matched_forms"]
+                        await save_message(
+                            save_db,
+                            conversation_id,
+                            "assistant",
+                            assistant_response,
+                            metadata=meta or None,
+                        )
+                except Exception:
+                    pass  # 儲存失敗不影響已完成的串流
+
+        finally:
+            _chat_semaphore.release()
 
     return StreamingResponse(
         event_generator(),

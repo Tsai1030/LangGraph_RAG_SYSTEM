@@ -52,6 +52,10 @@ export async function streamChat(
     response = await doFetch(token);
   }
 
+  if (response.status === 503) {
+    throw new Error("OVERLOADED");
+  }
+
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}`);
   }

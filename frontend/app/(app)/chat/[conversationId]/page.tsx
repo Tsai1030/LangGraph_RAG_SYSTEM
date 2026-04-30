@@ -154,6 +154,17 @@ export default function ChatPage() {
         return;
       }
 
+      if (err instanceof Error && err.message === "OVERLOADED") {
+        appendMessage({
+          id: assistantId,
+          role: "assistant",
+          content: "系統目前繁忙，請稍後再試。",
+          meta: null,
+          created_at: new Date().toISOString(),
+        });
+        return;
+      }
+
       if (err instanceof Error && err.name !== "AbortError") {
         appendMessage({
           id: assistantId,
