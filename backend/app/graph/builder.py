@@ -20,20 +20,20 @@ Graph 流程：
                                             │                         └─ insufficient ─► query_rewriter ──────────────────────────┘
                                             │                               │ (sufficient OR 超過重試上限)
                                             └─ need_retrieval=False ─► intent_classifier
-                                                                          ├─ form_explicit + matched_forms → form_request ─► responder（靜態下載）
-                                                                          ├─ is_form_continuation → form_request ─► form_structurer ─► responder
-                                                                          ├─ form_request（有 chunks）──────────── ─► form_structurer ─► responder
+                                                                          ├─ form_explicit + matched_forms → [responder ∥ source_filter] → END
+                                                                          ├─ form_request（有 chunks）─► form_structurer → [responder ∥ source_filter] → END
                                                                           ├─ form_request（無 chunks）─► retriever（補做）
-                                                                          └─ qa ──────────────────────────────────────────────────► responder
-                                                                                                                                       │
-                                                                                                                                 source_filter
-                                                                                                                                       │
-                                                                                                                                      END
+                                                                          └─ qa ──────────────────────► [responder ∥ source_filter] → END
+
+  responder 與 source_filter 並行執行（fan-out / fan-in）：
+    - responder：串流生成回答
+    - source_filter：以 query + retrieved_chunks 評估相關來源（不依賴 response）
 """
 
 from __future__ import annotations
 
 import logging
+from typing import Union
 
 from langgraph.graph import END, START, StateGraph
 
@@ -63,21 +63,19 @@ def _route_retrieval(state: GraphState) -> str:
     return "retriever" if state.get("need_retrieval", True) else "intent_classifier"
 
 
-def _route_intent(state: GraphState) -> str:
+def _route_intent(state: GraphState) -> Union[str, list[str]]:
     """
     intent_classifier 後的條件路由。
 
-    靜態表單（form_explicit=True + matched_forms）→ 直接 responder，跳過 form_structurer。
+    靜態表單（form_explicit=True + matched_forms）→ [responder ∥ source_filter] 並行。
     動態表單（form_request，無靜態匹配）→ 有 chunks 進 form_structurer，否則先補 retriever。
-    qa → responder。
+    qa → [responder ∥ source_filter] 並行。
     """
     if state.get("intent") == "form_request":
-        # 靜態表單：已明確比對到檔案，不需動態生成
         if state.get("form_explicit") and state.get("matched_forms"):
-            return "responder"
-        # 動態表單：走既有的 form_structurer 路徑
+            return ["responder", "source_filter"]
         return "form_structurer" if state.get("retrieved_chunks") else "retriever"
-    return "responder"
+    return ["responder", "source_filter"]
 
 
 def _route_grader(state: GraphState) -> str:
@@ -126,7 +124,7 @@ def build_graph(checkpointer=None):
     # summarizer 完成後進 retrieval_router
     graph.add_edge("summarizer", "retrieval_router")
 
-    # retrieval_router → retriever（需要）或 responder（跳過）
+    # retrieval_router → retriever（需要）或 intent_classifier（跳過）
     graph.add_conditional_edges("retrieval_router", _route_retrieval)
 
     # RAG 主流程
@@ -137,14 +135,17 @@ def build_graph(checkpointer=None):
     graph.add_conditional_edges("retrieval_grader", _route_grader)
     graph.add_edge("query_rewriter", "retriever")
 
-    # intent_classifier → form_structurer 或 responder（條件邊）
+    # intent_classifier → [responder ∥ source_filter] 並行（qa / form_explicit）
+    #                   → form_structurer（form_request + chunks）
+    #                   → retriever（form_request，無 chunks）
     graph.add_conditional_edges("intent_classifier", _route_intent)
 
-    # form_structurer 完成後進 responder（讓 responder 加上表單說明文字）
+    # form_structurer → [responder ∥ source_filter] 並行
     graph.add_edge("form_structurer", "responder")
+    graph.add_edge("form_structurer", "source_filter")
 
-    # responder → source_filter → END
-    graph.add_edge("responder", "source_filter")
+    # 並行分支都接 END（LangGraph fan-in 自動等待兩者完成）
+    graph.add_edge("responder", END)
     graph.add_edge("source_filter", END)
 
     return graph.compile(checkpointer=checkpointer)

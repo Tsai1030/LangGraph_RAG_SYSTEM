@@ -1,10 +1,8 @@
 """
 source_filter.py — 來源過濾節點
 
-在 responder 生成回答後，使用 LLM 評估哪些 retrieved chunks
-實際上對回答有貢獻，以結構化輸出覆寫 sources。
-
-僅保留 used=True 且 confidence >= CONFIDENCE_THRESHOLD 的 chunks。
+與 responder 並行執行。使用 query + retrieved_chunks 評估哪些 chunk
+對回答問題有實質貢獻，輸出最小化（只回傳相關 chunk 索引列表）。
 """
 
 from __future__ import annotations
@@ -22,42 +20,28 @@ from app.rag.retriever import format_sources
 
 logger = logging.getLogger(__name__)
 
-_CONFIDENCE_THRESHOLD = 0.6
-
-
-class ChunkEvaluation(BaseModel):
-    chunk_index: int = Field(description="chunk 在列表中的索引（從 0 開始）")
-    used: bool = Field(description="此 chunk 是否對回答有實質貢獻")
-    reason: str = Field(description="一句話說明判斷依據")
-    confidence: float = Field(ge=0.0, le=1.0, description="判斷信心度（0.0–1.0）")
-
 
 class SourceFilterOutput(BaseModel):
-    evaluations: List[ChunkEvaluation]
+    relevant_indices: List[int] = Field(
+        description="對回答問題有實質貢獻的 chunk 索引（從 0 開始）"
+    )
 
 
 _SYSTEM_PROMPT = """\
-你是一位來源評估助理。你的任務是判斷每個文件片段（chunk）是否對以下回答有實質貢獻。
-
-判斷標準：
-- used=true：chunk 提供了回答中使用到的資訊、數字、定義、流程或背景知識
-- used=false：chunk 與回答內容無關，或主題相關但未被實際採用
-- confidence：判斷信心度（0.0–1.0），語意明確則高，模稜兩可則低
-
-注意：回答是用自然語言重述的，不會直接引用原文，請從語意層面判斷貢獻。
-每個 chunk 都必須給出評估，不可略過。"""
+你是來源評估助理。根據問題與文件片段，列出真正能回答此問題的 chunk 索引。
+只列出有實質貢獻的索引，不相關的不要列入。"""
 
 
 async def source_filter(state: GraphState) -> dict:
     """
-    評估 retrieved_chunks 對最終回答的實際貢獻，
-    過濾後覆寫 sources（used=True 且 confidence >= 0.6 才保留）。
-    若無 chunks 或無 response（靜態表單路徑）則直接回傳空 sources。
+    評估 retrieved_chunks 對問題的相關性，過濾後更新 sources。
+    使用 query 而非 response，可與 responder 並行執行。
+    若無 chunks 則直接回傳空 sources。
     """
     chunks = state.get("retrieved_chunks", [])
-    response = state.get("response", "")
+    query = state.get("retrieval_query") or state.get("query", "")
 
-    if not chunks or not response:
+    if not chunks or not query:
         return {"sources": []}
 
     chunk_previews: list[str] = []
@@ -65,15 +49,15 @@ async def source_filter(state: GraphState) -> dict:
         meta = chunk.get("metadata", {})
         source = meta.get("source_file", "")
         h2 = meta.get("parent_h2", "")
-        content = chunk.get("document", "")[:300]
-        header = f"[chunk {i}]"
+        content = chunk.get("document", "")[:120]
+        header = f"[{i}]"
         if source:
-            header += f" 【{source}】"
+            header += f"【{source}】"
         if h2:
             header += f"【{h2}】"
-        chunk_previews.append(f"{header}\n{content}")
+        chunk_previews.append(f"{header} {content}")
 
-    chunks_text = "\n\n".join(chunk_previews)
+    chunks_text = "\n".join(chunk_previews)
 
     llm = ChatOpenAI(
         model=settings.grader_model,
@@ -83,32 +67,16 @@ async def source_filter(state: GraphState) -> dict:
 
     result: SourceFilterOutput = await llm.ainvoke([
         SystemMessage(content=_SYSTEM_PROMPT),
-        HumanMessage(content=f"【回答】\n{response}\n\n【文件片段】\n{chunks_text}"),
+        HumanMessage(content=f"問題：{query}\n\n文件片段：\n{chunks_text}"),
     ])
 
-    used_indices = {
-        ev.chunk_index
-        for ev in result.evaluations
-        if ev.used and ev.confidence >= _CONFIDENCE_THRESHOLD
-    }
-
-    filtered_chunks = [
-        chunks[i] for i in sorted(used_indices) if i < len(chunks)
-    ]
+    used_indices = {i for i in result.relevant_indices if 0 <= i < len(chunks)}
+    filtered_chunks = [chunks[i] for i in sorted(used_indices)]
 
     logger.info(
-        "[source_filter] total=%d  filtered=%d  threshold=%.1f",
+        "[source_filter] total=%d  filtered=%d",
         len(chunks),
         len(filtered_chunks),
-        _CONFIDENCE_THRESHOLD,
     )
-    for ev in result.evaluations:
-        logger.debug(
-            "[source_filter] chunk=%d  used=%s  conf=%.2f  reason='%s'",
-            ev.chunk_index,
-            ev.used,
-            ev.confidence,
-            ev.reason,
-        )
 
     return {"sources": format_sources(filtered_chunks)}
