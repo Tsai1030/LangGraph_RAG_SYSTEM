@@ -26,6 +26,8 @@ Graph 流程：
                                                                           ├─ form_request（無 chunks）─► retriever（補做）
                                                                           └─ qa ──────────────────────────────────────────────────► responder
                                                                                                                                        │
+                                                                                                                                 source_filter
+                                                                                                                                       │
                                                                                                                                       END
 """
 
@@ -45,6 +47,7 @@ from app.graph.nodes.grader import query_rewriter, retrieval_grader
 from app.graph.nodes.intent import intent_classifier
 from app.graph.nodes.retrieval import retriever
 from app.graph.nodes.router import retrieval_router
+from app.graph.nodes.source_filter import source_filter
 from app.graph.state import GraphState
 
 _MAX_RETRIES = 2
@@ -110,6 +113,7 @@ def build_graph(checkpointer=None):
     graph.add_node("intent_classifier", intent_classifier)
     graph.add_node("form_structurer", form_structurer)
     graph.add_node("responder", responder)
+    graph.add_node("source_filter", source_filter)
 
     # ── 加入邊 ──────────────────────────────────────────────
 
@@ -139,7 +143,8 @@ def build_graph(checkpointer=None):
     # form_structurer 完成後進 responder（讓 responder 加上表單說明文字）
     graph.add_edge("form_structurer", "responder")
 
-    # responder → END
-    graph.add_edge("responder", END)
+    # responder → source_filter → END
+    graph.add_edge("responder", "source_filter")
+    graph.add_edge("source_filter", END)
 
     return graph.compile(checkpointer=checkpointer)
