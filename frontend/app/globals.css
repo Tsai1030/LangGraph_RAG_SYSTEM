@@ -134,10 +134,23 @@ body {
   0%, 100% { transform: scale(0.8); opacity: 0.5; }
   50%       { transform: scale(1.2); opacity: 1; }
 }
+@keyframes thinkingGradient {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
 
 .animate-fade-up       { animation: fadeUp 0.2s ease-out both; }
 .animate-slide-up      { animation: slideUp 0.28s ease-out both; }
 .animate-spin-fast     { animation: spinFast 0.7s linear infinite; }
+.thinking-gradient {
+  background: linear-gradient(90deg, #a1a1aa, #818cf8, #a78bfa, #6366f1, #a1a1aa);
+  background-size: 300% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: thinkingGradient 2.5s ease infinite;
+}
 
 /* Streaming cursor */
 .streaming-cursor::after {

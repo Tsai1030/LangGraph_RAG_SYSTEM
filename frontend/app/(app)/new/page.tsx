@@ -58,7 +58,7 @@ export default function NewPage() {
           autoResize(e.target);
         }}
         onKeyDown={(e) => {
-          if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+          if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
             handleSend(value);
           }

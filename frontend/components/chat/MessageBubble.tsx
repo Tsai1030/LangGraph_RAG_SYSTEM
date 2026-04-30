@@ -118,17 +118,11 @@ function FormLoadingCard() {
   );
 }
 
-function ThinkingDots() {
+function ThinkingText() {
   return (
-    <div className="flex items-center gap-1 h-5 py-1">
-      {[0, 200, 400].map((delay) => (
-        <span
-          key={delay}
-          className="size-1.5 rounded-full bg-zinc-300"
-          style={{ animation: `pulseDot 1.4s ease-in-out ${delay}ms infinite` }}
-        />
-      ))}
-    </div>
+    <span className="text-sm font-medium tracking-wide thinking-gradient select-none">
+      Thinking
+    </span>
   );
 }
 
@@ -185,7 +179,7 @@ export default function MessageBubble({
                 </ReactMarkdown>
               </div>
             ) : !isFormLoading ? (
-              <ThinkingDots />
+              <ThinkingText />
             ) : null}
           </div>
 
