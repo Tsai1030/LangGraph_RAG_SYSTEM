@@ -1,5 +1,20 @@
 import { create } from "zustand";
-import type { ConversationOut, MessageOut } from "@/types";
+import type {
+  ConversationOut,
+  FormData,
+  FormFile,
+  MessageOut,
+  Source,
+} from "@/types";
+
+interface ConversationStreamingState {
+  isStreaming: boolean;
+  isFormLoading: boolean;
+  streamingMessage: MessageOut | null;
+  streamingFormData: FormData | null;
+  streamingFormFiles: FormFile[];
+  streamingSources: Source[];
+}
 
 interface ChatState {
   conversations: ConversationOut[];
@@ -13,9 +28,17 @@ interface ChatState {
   appendMessage: (msg: MessageOut) => void;
   updateLastAssistantMessage: (content: string) => void;
 
-  // 從 /new 頁跳轉至 /chat 時，帶入第一則待送訊息
   pendingMessage: string | null;
   setPendingMessage: (msg: string | null) => void;
+
+  streamingByConversation: Record<string, ConversationStreamingState>;
+  startStreaming: (conversationId: string, message: MessageOut) => void;
+  appendStreamingText: (conversationId: string, chunk: string) => void;
+  setStreamingFormLoading: (conversationId: string, loading: boolean) => void;
+  setStreamingFormData: (conversationId: string, data: FormData | null) => void;
+  setStreamingFormFiles: (conversationId: string, files: FormFile[]) => void;
+  setStreamingSources: (conversationId: string, sources: Source[]) => void;
+  clearStreaming: (conversationId: string) => void;
 }
 
 export const useChatStore = create<ChatState>((set) => ({
@@ -48,4 +71,92 @@ export const useChatStore = create<ChatState>((set) => ({
 
   pendingMessage: null,
   setPendingMessage: (msg) => set({ pendingMessage: msg }),
+
+  streamingByConversation: {},
+  startStreaming: (conversationId, message) =>
+    set((s) => ({
+      streamingByConversation: {
+        ...s.streamingByConversation,
+        [conversationId]: {
+          isStreaming: true,
+          isFormLoading: false,
+          streamingMessage: message,
+          streamingFormData: null,
+          streamingFormFiles: [],
+          streamingSources: [],
+        },
+      },
+    })),
+  appendStreamingText: (conversationId, chunk) =>
+    set((s) => {
+      const current = s.streamingByConversation[conversationId];
+      if (!current?.streamingMessage) return s;
+
+      return {
+        streamingByConversation: {
+          ...s.streamingByConversation,
+          [conversationId]: {
+            ...current,
+            streamingMessage: {
+              ...current.streamingMessage,
+              content: current.streamingMessage.content + chunk,
+            },
+          },
+        },
+      };
+    }),
+  setStreamingFormLoading: (conversationId, loading) =>
+    set((s) => {
+      const current = s.streamingByConversation[conversationId];
+      if (!current) return s;
+      return {
+        streamingByConversation: {
+          ...s.streamingByConversation,
+          [conversationId]: { ...current, isFormLoading: loading },
+        },
+      };
+    }),
+  setStreamingFormData: (conversationId, data) =>
+    set((s) => {
+      const current = s.streamingByConversation[conversationId];
+      if (!current) return s;
+      return {
+        streamingByConversation: {
+          ...s.streamingByConversation,
+          [conversationId]: {
+            ...current,
+            isFormLoading: false,
+            streamingFormData: data,
+          },
+        },
+      };
+    }),
+  setStreamingFormFiles: (conversationId, files) =>
+    set((s) => {
+      const current = s.streamingByConversation[conversationId];
+      if (!current) return s;
+      return {
+        streamingByConversation: {
+          ...s.streamingByConversation,
+          [conversationId]: { ...current, streamingFormFiles: files },
+        },
+      };
+    }),
+  setStreamingSources: (conversationId, sources) =>
+    set((s) => {
+      const current = s.streamingByConversation[conversationId];
+      if (!current) return s;
+      return {
+        streamingByConversation: {
+          ...s.streamingByConversation,
+          [conversationId]: { ...current, streamingSources: sources },
+        },
+      };
+    }),
+  clearStreaming: (conversationId) =>
+    set((s) => {
+      const next = { ...s.streamingByConversation };
+      delete next[conversationId];
+      return { streamingByConversation: next };
+    }),
 }));
