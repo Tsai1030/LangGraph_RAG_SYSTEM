@@ -7,27 +7,28 @@ Graph 流程：
           ├─ is_compact_needed=True  ─► summarizer ─┐
           └─ is_compact_needed=False ───────────────┘
                                                      ▼
-                                           retrieval_router（LLM structured output: RouterDecision）
-                                            ├─ form_explicit=True ─────────────────────────────────────────────► intent_classifier
-                                            ├─ need_retrieval=True ─► retriever
-                                            │    （is_form_continuation=True 時附帶 retrieval_topic 作為 retrieval_query）
-                                            │                               │
-                                            │                         context_builder
-                                            │                               │
-                                            │                        retrieval_grader（GraderOutput: decision/reason/missing）
-                                            │                         ├─ sufficient ─────────────────────────────────────────────► │
-                                            │                         │                                                            │ (loop ≤ 2)
-                                            │                         └─ insufficient ─► query_rewriter ──────────────────────────┘
-                                            │                               │ (sufficient OR 超過重試上限)
-                                            └─ need_retrieval=False ─► intent_classifier
-                                                                          ├─ form_explicit + matched_forms → [responder ∥ source_filter] → END
-                                                                          ├─ form_request（有 chunks）─► form_structurer → [responder ∥ source_filter] → END
-                                                                          ├─ form_request（無 chunks）─► retriever（補做）
-                                                                          └─ qa ──────────────────────► [responder ∥ source_filter] → END
+                                           unified_intent（單一 LLM 結構化輸出，決定 intent + need_retrieval）
+                                            ├─ intent=static_form_download ──► [responder ∥ source_filter] → END
+                                            ├─ intent=static_form_fill ──────► form_template_loader ─► form_fill_collector
+                                            │                                     ├─ ready ─► form_filler ─► responder → END
+                                            │                                     └─ collecting ─► responder → END
+                                            ├─ intent=qa, need_retrieval=False ──► [responder ∥ source_filter] → END
+                                            ├─ intent=qa, need_retrieval=True ───► retriever
+                                            └─ intent=dynamic_form_generate / form_continuation ► retriever
+                                                                                                    │
+                                                                                              context_builder
+                                                                                                    │
+                                                                                          retrieval_grader
+                                                                                            ├─ insufficient (<2 retries) ─► query_rewriter ─► retriever
+                                                                                            └─ sufficient / max retries ─► route_post_grader
+                                                                                                                              ├─ form intents ─► form_structurer ─► [responder ∥ source_filter] → END
+                                                                                                                              └─ qa ──────────► [responder ∥ source_filter] → END
 
   responder 與 source_filter 並行執行（fan-out / fan-in）：
     - responder：串流生成回答
     - source_filter：以 query + retrieved_chunks 評估相關來源（不依賴 response）
+
+  static_form_fill 不走 source_filter（無檢索結果）。
 """
 
 from __future__ import annotations
@@ -42,50 +43,68 @@ logger = logging.getLogger(__name__)
 from app.graph.nodes.compact import compact_check, summarizer
 from app.graph.nodes.context import context_builder
 from app.graph.nodes.form import form_structurer
+from app.graph.nodes.form_fill import (
+    form_fill_collector,
+    form_filler,
+    form_template_loader,
+)
 from app.graph.nodes.generation import responder
 from app.graph.nodes.grader import query_rewriter, retrieval_grader
-from app.graph.nodes.intent import intent_classifier
 from app.graph.nodes.retrieval import retriever
-from app.graph.nodes.router import retrieval_router
 from app.graph.nodes.source_filter import source_filter
+from app.graph.nodes.unified_intent import unified_intent
 from app.graph.state import GraphState
 
 _MAX_RETRIES = 2
+_FORM_INTENTS = {"dynamic_form_generate", "form_continuation"}
 
 
 def _route_compact(state: GraphState) -> str:
     """compact_check 後的條件路由"""
-    return "summarizer" if state.get("is_compact_needed") else "retrieval_router"
-
-
-def _route_retrieval(state: GraphState) -> str:
-    """retrieval_router 後的條件路由：需要檢索 → retriever；跳過 → intent_classifier"""
-    return "retriever" if state.get("need_retrieval", True) else "intent_classifier"
+    return "summarizer" if state.get("is_compact_needed") else "unified_intent"
 
 
 def _route_intent(state: GraphState) -> Union[str, list[str]]:
     """
-    intent_classifier 後的條件路由。
-
-    靜態表單（form_explicit=True + matched_forms）→ [responder ∥ source_filter] 並行。
-    動態表單（form_request，無靜態匹配）→ 有 chunks 進 form_structurer，否則先補 retriever。
-    qa → [responder ∥ source_filter] 並行。
+    unified_intent 後的路由：
+    - static_form_download → 並行直接回 responder ∥ source_filter（無需檢索）
+    - static_form_fill → form_template_loader（進入填表流程）
+    - 任何意圖 + need_retrieval=True → retriever（含 form 生成類）
+    - 否則 → 並行 responder ∥ source_filter
     """
-    if state.get("intent") == "form_request":
-        if state.get("form_explicit") and state.get("matched_forms"):
-            return ["responder", "source_filter"]
-        return "form_structurer" if state.get("retrieved_chunks") else "retriever"
+    intent = state.get("intent")
+    if intent == "static_form_download":
+        return ["responder", "source_filter"]
+    if intent == "static_form_fill":
+        return "form_template_loader"
+    if state.get("need_retrieval", True):
+        return "retriever"
     return ["responder", "source_filter"]
 
 
-def _route_grader(state: GraphState) -> str:
-    """retrieval_grader 後的條件路由：insufficient 且未超過重試上限 → 重寫查詢；其餘 → 繼續生成"""
+def _route_after_collector(state: GraphState) -> str:
+    """
+    form_fill_collector 後：session 進入 ready → form_filler；否則直接由 responder 追問。
+    """
+    session = state.get("form_fill_session") or {}
+    return "form_filler" if session.get("status") == "ready" else "responder"
+
+
+def _route_grader(state: GraphState) -> Union[str, list[str]]:
+    """
+    retrieval_grader 後的路由：
+    - insufficient 且未達重試上限 → query_rewriter
+    - 否則：依 intent 決定是否還需要 form_structurer
+    """
     grade = state.get("retrieval_grade")
     retry = state.get("retry_count") or 0
     logger.info("[route_grader] grade=%s  retry_count=%d  max=%d", grade, retry, _MAX_RETRIES)
     if grade == "insufficient" and retry < _MAX_RETRIES:
         return "query_rewriter"
-    return "intent_classifier"
+
+    if state.get("intent") in _FORM_INTENTS:
+        return "form_structurer"
+    return ["responder", "source_filter"]
 
 
 def build_graph(checkpointer=None):
@@ -103,13 +122,15 @@ def build_graph(checkpointer=None):
     # ── 加入節點 ────────────────────────────────────────────
     graph.add_node("compact_check", compact_check)
     graph.add_node("summarizer", summarizer)
-    graph.add_node("retrieval_router", retrieval_router)
+    graph.add_node("unified_intent", unified_intent)
     graph.add_node("retriever", retriever)
     graph.add_node("context_builder", context_builder)
     graph.add_node("retrieval_grader", retrieval_grader)
     graph.add_node("query_rewriter", query_rewriter)
-    graph.add_node("intent_classifier", intent_classifier)
     graph.add_node("form_structurer", form_structurer)
+    graph.add_node("form_template_loader", form_template_loader)
+    graph.add_node("form_fill_collector", form_fill_collector)
+    graph.add_node("form_filler", form_filler)
     graph.add_node("responder", responder)
     graph.add_node("source_filter", source_filter)
 
@@ -118,33 +139,33 @@ def build_graph(checkpointer=None):
     # 入口
     graph.add_edge(START, "compact_check")
 
-    # compact_check → summarizer 或 retrieval_router（條件邊）
+    # compact_check → summarizer 或 unified_intent
     graph.add_conditional_edges("compact_check", _route_compact)
 
-    # summarizer 完成後進 retrieval_router
-    graph.add_edge("summarizer", "retrieval_router")
+    # summarizer 完成後進 unified_intent
+    graph.add_edge("summarizer", "unified_intent")
 
-    # retrieval_router → retriever（需要）或 intent_classifier（跳過）
-    graph.add_conditional_edges("retrieval_router", _route_retrieval)
+    # unified_intent → retriever（需檢索）或 [responder ∥ source_filter]（直接回應）
+    graph.add_conditional_edges("unified_intent", _route_intent)
 
     # RAG 主流程
     graph.add_edge("retriever", "context_builder")
 
-    # CRAG 閉環：context_builder → retrieval_grader → (query_rewriter → retriever) 或 intent_classifier
+    # CRAG 閉環：context_builder → retrieval_grader → (rewriter→retriever) 或 終端路由
     graph.add_edge("context_builder", "retrieval_grader")
     graph.add_conditional_edges("retrieval_grader", _route_grader)
     graph.add_edge("query_rewriter", "retriever")
-
-    # intent_classifier → [responder ∥ source_filter] 並行（qa / form_explicit）
-    #                   → form_structurer（form_request + chunks）
-    #                   → retriever（form_request，無 chunks）
-    graph.add_conditional_edges("intent_classifier", _route_intent)
 
     # form_structurer → [responder ∥ source_filter] 並行
     graph.add_edge("form_structurer", "responder")
     graph.add_edge("form_structurer", "source_filter")
 
-    # 並行分支都接 END（LangGraph fan-in 自動等待兩者完成）
+    # 填表流程：loader → collector → (filler 或 responder)
+    graph.add_edge("form_template_loader", "form_fill_collector")
+    graph.add_conditional_edges("form_fill_collector", _route_after_collector)
+    graph.add_edge("form_filler", "responder")
+
+    # 並行分支匯入 END（LangGraph fan-in 自動等待兩者完成）
     graph.add_edge("responder", END)
     graph.add_edge("source_filter", END)
 

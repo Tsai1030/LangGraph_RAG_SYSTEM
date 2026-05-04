@@ -85,18 +85,117 @@ _STATIC_FORM_SYSTEM = """\
 禁止在句首加上「已找到」、「為您找到」等確認語，直接從《表單名稱》開始。"""
 
 
+_FILL_COLLECT_SYSTEM = """\
+你是表單填寫助理，正引導使用者把資料填入靜態表單。請以繁體中文簡潔回應（120字內）。
+
+回應原則：
+- 先一句確認本輪做了什麼（收到欄位 / 完成批次編輯 / 代寫了內容）
+- 若本輪有「AI 代寫的欄位」：**完整列出代寫內容讓使用者過目**（一個欄位一行），告知可說「把 X 改成 Y」修改
+- 若仍有待填欄位：列出下一批 3-5 個關鍵欄位 label
+- 末段務必清楚提示兩個選項：
+  1. 一次描述多個欄位繼續補（或對代寫內容說『改成…』修改）
+  2. **輸入「就這樣」或「全部填 test」可立即產出填好的檔案下載**
+- 嚴禁列出超過 5 個未填欄位
+- 嚴禁輸出 markdown 表格或欄位 key（如 tbl0_r2_status）"""
+
+_FILL_DONE_SYSTEM = """\
+表單已填寫完成。請用一句繁體中文（30字內）告知使用者並提示點擊下方下載。
+範例：「已將您的資料填入《動員開工作業檢核表》，請點選下方下載。」
+直接從「已將」或「已為您填好」開始；禁止確認語。"""
+
+
+def _build_fill_collect_user(state: GraphState) -> str:
+    """組裝填表追問用的 user prompt：本輪訊息 + 已收集 + 仍缺欄位 label 清單"""
+    from app.services.form_fill_writer import load_schema
+
+    session = state.get("form_fill_session") or {}
+    target_id = session.get("target_form_id")
+    schema = load_schema(target_id) if target_id else None
+    title = (schema or {}).get("title", "靜態表單")
+    fields = (schema or {}).get("fields", [])
+    collected = session.get("collected", {})
+
+    required_pending = [f for f in fields if f.get("required") and f["key"] not in collected]
+    optional_pending = [f for f in fields if not f.get("required") and f["key"] not in collected]
+    next_batch = required_pending + optional_pending[: max(0, 5 - len(required_pending))]
+    next_batch = next_batch[:5]
+
+    pending_labels = [f["label"] for f in next_batch]
+    total_pending = len(required_pending) + len(optional_pending)
+    bulk_edit = session.get("last_bulk_edit")
+    ghost_keys = session.get("last_ghost_written") or []
+    ghost_items = [
+        {"label": next((f["label"] for f in fields if f["key"] == k), k),
+         "value": collected.get(k, "")}
+        for k in ghost_keys
+    ]
+
+    parts = [
+        f"目標表單：{title}",
+        f"使用者本輪訊息：{state['query']}",
+        f"已收集欄位總數：{len(collected)} / {len(fields)}",
+    ]
+    if ghost_items:
+        ghost_lines = "\n".join(
+            f"- {it['label']}：{it['value'][:80]}{'…' if len(it['value']) > 80 else ''}"
+            for it in ghost_items
+        )
+        parts.append(f"本輪 AI 代寫的欄位（請在回應中讓使用者過目並可改）：\n{ghost_lines}")
+    if bulk_edit:
+        parts.append(f"本輪批次編輯結果：{bulk_edit}")
+    parts.append(f"仍待填欄位總數：{total_pending}")
+    if pending_labels:
+        parts.append("下一批請追問的欄位 label：\n" + "\n".join(f"- {l}" for l in pending_labels))
+    else:
+        parts.append("已沒有未填欄位，請告訴使用者：「全部欄位都已填寫，輸入『就這樣』即可下載填好的檔案」")
+    return "\n".join(parts)
+
+
 async def responder(state: GraphState) -> dict:
     """
-    生成回覆。
-    - 靜態表單明確請求：用短確認句，不做 RAG 生成
-    - 一般 QA（含表單提示）：完整 RAG 生成
-    streaming=True：配合 LangGraph astream_events，讓 chat endpoint 可逐 token 推送 SSE。
+    生成回覆。intent 與 fill session 決定使用哪一種 prompt：
+    - static_form_fill + status=completed → 短確認句 + 下載連結提示
+    - static_form_fill + status=collecting → 追問仍缺欄位
+    - static_form_download → 短確認句
+    - 其他 → 完整 RAG 生成
+    streaming=True：配合 astream_events 讓 chat endpoint 逐 token 推送 SSE。
     """
+    intent = state.get("intent")
     matched_forms = state.get("matched_forms", [])
     form_explicit = state.get("form_explicit", False)
+    session = state.get("form_fill_session") or {}
 
-    # 靜態表單明確請求：短確認句，跳過完整 RAG 系統提示
-    if form_explicit and matched_forms:
+    # ── 填表完成 ─────────────────────────────────────────────
+    if intent == "static_form_fill" and session.get("status") == "completed":
+        names = "、".join(f"《{f['display_name']}》" for f in matched_forms) or "《表單》"
+        llm = ChatOpenAI(
+            model=settings.grader_model,
+            api_key=settings.openai_api_key,
+            temperature=0,
+            streaming=True,
+        )
+        resp = await llm.ainvoke([
+            SystemMessage(content=_FILL_DONE_SYSTEM),
+            HumanMessage(content=f"目標：{names}；已寫入 {session.get('filled_field_count', 0)} 欄位"),
+        ])
+        return {"response": resp.content, "messages": [AIMessage(content=resp.content)]}
+
+    # ── 填表收集中（追問缺欄位）────────────────────────────
+    if intent == "static_form_fill" and session.get("status") == "collecting":
+        llm = ChatOpenAI(
+            model=settings.llm_model,
+            api_key=settings.openai_api_key,
+            temperature=0.3,
+            streaming=True,
+        )
+        resp = await llm.ainvoke([
+            SystemMessage(content=_FILL_COLLECT_SYSTEM),
+            HumanMessage(content=_build_fill_collect_user(state)),
+        ])
+        return {"response": resp.content, "messages": [AIMessage(content=resp.content)]}
+
+    # ── 靜態表單下載：短確認句 ─────────────────────────────
+    if intent == "static_form_download" and form_explicit and matched_forms:
         names = "、".join(f"《{f['display_name']}》" for f in matched_forms)
         llm = ChatOpenAI(
             model=settings.grader_model,
@@ -113,7 +212,7 @@ async def responder(state: GraphState) -> dict:
             "messages": [AIMessage(content=response.content)],
         }
 
-    # 一般 QA / 動態表單生成
+    # ── 一般 QA / 動態表單生成 ─────────────────────────────
     llm = ChatOpenAI(
         model=settings.llm_model,
         api_key=settings.openai_api_key,

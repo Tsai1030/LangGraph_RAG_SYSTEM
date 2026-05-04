@@ -61,3 +61,13 @@ class GraphState(TypedDict):
     # ── 多輪表單延續 ───────────────────────────────────────────
     prev_form_data: Optional[dict]  # 最近一輪生成的表單（供延續生成時避免重複、保持格式一致）
     is_form_continuation: bool      # True = router 判定為延續上一輪表單，intent 直接 fast-path
+
+    # ── 靜態表單填寫 session（多輪持久化）──────────────────────
+    # 由 checkpointer 自動跨輪保留，form_template_loader / form_fill_collector / form_filler 共同維護
+    # {
+    #   "target_form_id": "010101",
+    #   "collected": {"工程名稱": "...", "tbl0_r2_status": "V"},  # field key → value
+    #   "status": "collecting" | "ready" | "completed",
+    #   "filled_token": "<filename>"  # 完成填寫後的 docx 檔名（download endpoint 用）
+    # }
+    form_fill_session: Optional[dict]

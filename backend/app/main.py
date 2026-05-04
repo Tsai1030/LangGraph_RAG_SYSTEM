@@ -31,6 +31,7 @@ from app.core.dependencies import get_current_user
 from app.graph.builder import build_graph
 from app.models.user import User
 from app.rag.form_lookup import get_form_path
+from app.services.form_fill_writer import get_filled_path
 
 from pathlib import Path
 
@@ -140,10 +141,28 @@ async def download_form(
     form_id: str,
     current_user: User = Depends(get_current_user),
 ):
-    """下載靜態表單 .docx 檔案"""
+    """下載靜態表單 .docx 檔案（空白模板）"""
     path = get_form_path(form_id)
     if path is None:
         raise HTTPException(status_code=404, detail=f"Form not found: {form_id}")
+    encoded_name = quote(path.name, safe="")
+    return FileResponse(
+        str(path),
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename=path.name,
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_name}"},
+    )
+
+
+@app.get("/api/forms/filled/{token}")
+async def download_filled_form(
+    token: str,
+    current_user: User = Depends(get_current_user),
+):
+    """下載 agent 已填寫的表單 .docx。token 為 form_fill_session.filled_token（檔名）。"""
+    path = get_filled_path(token)
+    if path is None:
+        raise HTTPException(status_code=404, detail=f"Filled form not found: {token}")
     encoded_name = quote(path.name, safe="")
     return FileResponse(
         str(path),

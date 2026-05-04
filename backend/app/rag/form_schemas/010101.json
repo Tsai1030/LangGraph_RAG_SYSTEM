@@ -1,0 +1,703 @@
+{
+  "form_id": "010101",
+  "title": "動員開工作業檢核表",
+  "file_name": "010101動員開工作業檢核表.docx",
+  "fields": [
+    {
+      "key": "工程名稱",
+      "label": "工程名稱",
+      "type": "text",
+      "required": true,
+      "loc": {
+        "kind": "para",
+        "para_idx": 1,
+        "marker": "工程名稱:",
+        "marker_end": "\t"
+      }
+    },
+    {
+      "key": "工令",
+      "label": "工令",
+      "type": "text",
+      "required": true,
+      "loc": {
+        "kind": "para",
+        "para_idx": 1,
+        "marker": "工令:",
+        "marker_end": null
+      }
+    },
+    {
+      "key": "製表日期",
+      "label": "製表日期",
+      "type": "date",
+      "required": true,
+      "loc": {
+        "kind": "para",
+        "para_idx": 2,
+        "marker": "製表日期:",
+        "marker_end": null
+      }
+    },
+    {
+      "key": "tbl0_r1_status",
+      "label": "編號 1.19「其他契約規定應辦事項」 — 完成狀態",
+      "type": "checkbox_vx",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 0,
+        "row": 1,
+        "col": 7
+      }
+    },
+    {
+      "key": "tbl0_r1_remark",
+      "label": "編號 1.19「其他契約規定應辦事項」 — 備註",
+      "type": "text",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 0,
+        "row": 1,
+        "col": 8
+      }
+    },
+    {
+      "key": "tbl0_r2_status",
+      "label": "編號 2.1「組織提報」 — 完成狀態",
+      "type": "checkbox_vx",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 0,
+        "row": 2,
+        "col": 7
+      }
+    },
+    {
+      "key": "tbl0_r3_status",
+      "label": "編號 2.2「人力調派」 — 完成狀態",
+      "type": "checkbox_vx",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 0,
+        "row": 3,
+        "col": 7
+      }
+    },
+    {
+      "key": "tbl0_r4_status",
+      "label": "編號 2.3「授權印鑑」 — 完成狀態",
+      "type": "checkbox_vx",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 0,
+        "row": 4,
+        "col": 7
+      }
+    },
+    {
+      "key": "tbl0_r5_status",
+      "label": "編號 2.4「零用金申請」 — 完成狀態",
+      "type": "checkbox_vx",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 0,
+        "row": 5,
+        "col": 7
+      }
+    },
+    {
+      "key": "tbl0_r6_status",
+      "label": "編號 2.5「辦公室設置」 — 完成狀態",
+      "type": "checkbox_vx",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 0,
+        "row": 6,
+        "col": 7
+      }
+    },
+    {
+      "key": "tbl0_r7_status",
+      "label": "編號 2.6「車輛租賃(調撥)」 — 完成狀態",
+      "type": "checkbox_vx",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 0,
+        "row": 7,
+        "col": 7
+      }
+    },
+    {
+      "key": "tbl0_r8_status",
+      "label": "編號 2.7「測量儀器採購(調撥)」 — 完成狀態",
+      "type": "checkbox_vx",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 0,
+        "row": 8,
+        "col": 7
+      }
+    },
+    {
+      "key": "tbl0_r9_status",
+      "label": "編號 2.8「辦公設備採購(調撥)」 — 完成狀態",
+      "type": "checkbox_vx",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 0,
+        "row": 9,
+        "col": 7
+      }
+    },
+    {
+      "key": "tbl0_r10_status",
+      "label": "編號 2.9「資訊設備採購(調撥)」 — 完成狀態",
+      "type": "checkbox_vx",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 0,
+        "row": 10,
+        "col": 7
+      }
+    },
+    {
+      "key": "tbl0_r11_status",
+      "label": "編號 2.10「圖說及文件備份製作及分發」 — 完成狀態",
+      "type": "checkbox_vx",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 0,
+        "row": 11,
+        "col": 7
+      }
+    },
+    {
+      "key": "tbl0_r11_remark",
+      "label": "編號 2.10「圖說及文件備份製作及分發」 — 備註",
+      "type": "text",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 0,
+        "row": 11,
+        "col": 8
+      }
+    },
+    {
+      "key": "tbl0_r12_status",
+      "label": "編號 2.11「勞工安全衛生單位(人員)設置報備書」 — 完成狀態",
+      "type": "checkbox_vx",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 0,
+        "row": 12,
+        "col": 7
+      }
+    },
+    {
+      "key": "tbl0_r12_remark",
+      "label": "編號 2.11「勞工安全衛生單位(人員)設置報備書」 — 備註",
+      "type": "text",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 0,
+        "row": 12,
+        "col": 8
+      }
+    },
+    {
+      "key": "tbl0_r13_status",
+      "label": "編號 2.12「勞工安全衛生主管及管理員 (師)報備」 — 完成狀態",
+      "type": "checkbox_vx",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 0,
+        "row": 13,
+        "col": 7
+      }
+    },
+    {
+      "key": "tbl0_r13_remark",
+      "label": "編號 2.12「勞工安全衛生主管及管理員 (師)報備」 — 備註",
+      "type": "text",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 0,
+        "row": 13,
+        "col": 8
+      }
+    },
+    {
+      "key": "tbl0_r14_status",
+      "label": "編號 2.13「安全衛生工作手冊報備」 — 完成狀態",
+      "type": "checkbox_vx",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 0,
+        "row": 14,
+        "col": 7
+      }
+    },
+    {
+      "key": "tbl0_r14_remark",
+      "label": "編號 2.13「安全衛生工作手冊報備」 — 備註",
+      "type": "text",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 0,
+        "row": 14,
+        "col": 8
+      }
+    },
+    {
+      "key": "tbl0_r15_status",
+      "label": "編號 2.14「其他應辦事項」 — 完成狀態",
+      "type": "checkbox_vx",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 0,
+        "row": 15,
+        "col": 7
+      }
+    },
+    {
+      "key": "tbl0_r15_remark",
+      "label": "編號 2.14「其他應辦事項」 — 備註",
+      "type": "text",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 0,
+        "row": 15,
+        "col": 8
+      }
+    },
+    {
+      "key": "tbl0_r16_status",
+      "label": "編號 3.1「人力計畫」 — 完成狀態",
+      "type": "checkbox_vx",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 0,
+        "row": 16,
+        "col": 7
+      }
+    },
+    {
+      "key": "tbl0_r16_remark",
+      "label": "編號 3.1「人力計畫」 — 備註",
+      "type": "text",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 0,
+        "row": 16,
+        "col": 8
+      }
+    },
+    {
+      "key": "tbl0_r17_status",
+      "label": "編號 3.2「財務計畫」 — 完成狀態",
+      "type": "checkbox_vx",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 0,
+        "row": 17,
+        "col": 7
+      }
+    },
+    {
+      "key": "tbl0_r17_remark",
+      "label": "編號 3.2「財務計畫」 — 備註",
+      "type": "text",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 0,
+        "row": 17,
+        "col": 8
+      }
+    },
+    {
+      "key": "tbl0_r18_status",
+      "label": "編號 3.3「採發計畫」 — 完成狀態",
+      "type": "checkbox_vx",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 0,
+        "row": 18,
+        "col": 7
+      }
+    },
+    {
+      "key": "tbl0_r18_remark",
+      "label": "編號 3.3「採發計畫」 — 備註",
+      "type": "text",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 0,
+        "row": 18,
+        "col": 8
+      }
+    },
+    {
+      "key": "tbl0_r19_status",
+      "label": "編號 3.4「施工預算」 — 完成狀態",
+      "type": "checkbox_vx",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 0,
+        "row": 19,
+        "col": 7
+      }
+    },
+    {
+      "key": "tbl0_r20_status",
+      "label": "編號 3.5「施工計畫書 (含施工網圖)」 — 完成狀態",
+      "type": "checkbox_vx",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 0,
+        "row": 20,
+        "col": 7
+      }
+    },
+    {
+      "key": "tbl0_r20_remark",
+      "label": "編號 3.5「施工計畫書 (含施工網圖)」 — 備註",
+      "type": "text",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 0,
+        "row": 20,
+        "col": 8
+      }
+    },
+    {
+      "key": "tbl0_r21_status",
+      "label": "編號 3.6「品質計畫書」 — 完成狀態",
+      "type": "checkbox_vx",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 0,
+        "row": 21,
+        "col": 7
+      }
+    },
+    {
+      "key": "tbl0_r22_status",
+      "label": "編號 3.7「安全衛生管理計畫書」 — 完成狀態",
+      "type": "checkbox_vx",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 0,
+        "row": 22,
+        "col": 7
+      }
+    },
+    {
+      "key": "tbl1_r1_status",
+      "label": "編號 3.8「逕流廢水計畫書」 — 完成狀態",
+      "type": "checkbox_vx",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 1,
+        "row": 1,
+        "col": 7
+      }
+    },
+    {
+      "key": "tbl1_r1_remark",
+      "label": "編號 3.8「逕流廢水計畫書」 — 備註",
+      "type": "text",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 1,
+        "row": 1,
+        "col": 8
+      }
+    },
+    {
+      "key": "tbl1_r2_status",
+      "label": "編號 3.9「丁類危評」 — 完成狀態",
+      "type": "checkbox_vx",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 1,
+        "row": 2,
+        "col": 7
+      }
+    },
+    {
+      "key": "tbl1_r2_remark",
+      "label": "編號 3.9「丁類危評」 — 備註",
+      "type": "text",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 1,
+        "row": 2,
+        "col": 8
+      }
+    },
+    {
+      "key": "tbl1_r3_status",
+      "label": "編號 3.10「廢棄物清理計畫」 — 完成狀態",
+      "type": "checkbox_vx",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 1,
+        "row": 3,
+        "col": 7
+      }
+    },
+    {
+      "key": "tbl1_r3_remark",
+      "label": "編號 3.10「廢棄物清理計畫」 — 備註",
+      "type": "text",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 1,
+        "row": 3,
+        "col": 8
+      }
+    },
+    {
+      "key": "tbl1_r4_status",
+      "label": "編號 3.11「初期交通維持計畫」 — 完成狀態",
+      "type": "checkbox_vx",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 1,
+        "row": 4,
+        "col": 7
+      }
+    },
+    {
+      "key": "tbl1_r4_remark",
+      "label": "編號 3.11「初期交通維持計畫」 — 備註",
+      "type": "text",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 1,
+        "row": 4,
+        "col": 8
+      }
+    },
+    {
+      "key": "tbl1_r5_status",
+      "label": "編號 3.12「初期七合一項目時間規劃」 — 完成狀態",
+      "type": "checkbox_vx",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 1,
+        "row": 5,
+        "col": 7
+      }
+    },
+    {
+      "key": "tbl1_r5_remark",
+      "label": "編號 3.12「初期七合一項目時間規劃」 — 備註",
+      "type": "text",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 1,
+        "row": 5,
+        "col": 8
+      }
+    },
+    {
+      "key": "tbl1_r6_status",
+      "label": "編號 3.13「其他契約規定送審計畫書」 — 完成狀態",
+      "type": "checkbox_vx",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 1,
+        "row": 6,
+        "col": 7
+      }
+    },
+    {
+      "key": "tbl1_r6_remark",
+      "label": "編號 3.13「其他契約規定送審計畫書」 — 備註",
+      "type": "text",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 1,
+        "row": 6,
+        "col": 8
+      }
+    },
+    {
+      "key": "tbl1_r7_status",
+      "label": "編號 4.1「營造綜合保險」 — 完成狀態",
+      "type": "checkbox_vx",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 1,
+        "row": 7,
+        "col": 7
+      }
+    },
+    {
+      "key": "tbl1_r8_status",
+      "label": "編號 4.2「預拌混凝土材料」 — 完成狀態",
+      "type": "checkbox_vx",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 1,
+        "row": 8,
+        "col": 7
+      }
+    },
+    {
+      "key": "tbl1_r9_status",
+      "label": "編號 4.3「鋼筋材料採購」 — 完成狀態",
+      "type": "checkbox_vx",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 1,
+        "row": 9,
+        "col": 7
+      }
+    },
+    {
+      "key": "tbl1_r10_status",
+      "label": "編號 4.4「鄰屋鑑定」 — 完成狀態",
+      "type": "checkbox_vx",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 1,
+        "row": 10,
+        "col": 7
+      }
+    },
+    {
+      "key": "tbl1_r11_status",
+      "label": "編號 4.5「管線試挖」 — 完成狀態",
+      "type": "checkbox_vx",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 1,
+        "row": 11,
+        "col": 7
+      }
+    },
+    {
+      "key": "tbl1_r12_status",
+      "label": "編號 4.6「補充地質調查」 — 完成狀態",
+      "type": "checkbox_vx",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 1,
+        "row": 12,
+        "col": 7
+      }
+    },
+    {
+      "key": "tbl1_r13_status",
+      "label": "編號 4.7「施工圍籬」 — 完成狀態",
+      "type": "checkbox_vx",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 1,
+        "row": 13,
+        "col": 7
+      }
+    },
+    {
+      "key": "tbl1_r14_status",
+      "label": "編號 4.8「辦公室興建(裝修)」 — 完成狀態",
+      "type": "checkbox_vx",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 1,
+        "row": 14,
+        "col": 7
+      }
+    },
+    {
+      "key": "tbl1_r15_status",
+      "label": "編號 4.9「大地工程分包採購」 — 完成狀態",
+      "type": "checkbox_vx",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 1,
+        "row": 15,
+        "col": 7
+      }
+    },
+    {
+      "key": "tbl1_r16_status",
+      "label": "編號 4.10「其他初期應辦採購案」 — 完成狀態",
+      "type": "checkbox_vx",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 1,
+        "row": 16,
+        "col": 7
+      }
+    },
+    {
+      "key": "tbl1_r16_remark",
+      "label": "編號 4.10「其他初期應辦採購案」 — 備註",
+      "type": "text",
+      "required": false,
+      "loc": {
+        "kind": "cell",
+        "table_idx": 1,
+        "row": 16,
+        "col": 8
+      }
+    }
+  ]
+}

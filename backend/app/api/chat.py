@@ -186,6 +186,31 @@ async def chat_stream(
                     )
 
                 matched_forms = final_values.get("matched_forms", [])
+                fill_session = final_values.get("form_fill_session") or {}
+                intent = final_values.get("intent")
+
+                # 填表完成 → 把已填寫檔案以 form_files 形式推送（前端共用同一 UI 顯示下載按鈕）
+                if (
+                    fill_session.get("status") == "completed"
+                    and fill_session.get("filled_token")
+                ):
+                    target_id = fill_session.get("target_form_id")
+                    base_name = next(
+                        (m["display_name"] for m in matched_forms if m.get("form_id") == target_id),
+                        target_id or "已填寫表單",
+                    )
+                    matched_forms = [{
+                        "form_id": f"{target_id}_filled",
+                        "display_name": f"{base_name}（已填寫）",
+                        "download_url": f"/api/forms/filled/{fill_session['filled_token']}",
+                    }]
+                # 填表收集中：抑制「空白模板」按鈕，避免使用者誤以為按下載就拿到填好的版本
+                elif (
+                    intent == "static_form_fill"
+                    and fill_session.get("status") == "collecting"
+                ):
+                    matched_forms = []
+
                 if matched_forms:
                     yield (
                         f"data: {json.dumps({'type': 'form_files', 'data': matched_forms}, ensure_ascii=False)}\n\n"
@@ -202,8 +227,9 @@ async def chat_stream(
                             meta["sources"] = final_values["sources"]
                         if final_values.get("form_data"):
                             meta["form_data"] = final_values["form_data"]
-                        if final_values.get("matched_forms"):
-                            meta["form_files"] = final_values["matched_forms"]
+                        if matched_forms:
+                            # 此處 matched_forms 已是上方串流推送過的版本（可能是 filled 版）
+                            meta["form_files"] = matched_forms
                         await save_message(
                             save_db,
                             conversation_id,
