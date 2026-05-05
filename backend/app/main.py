@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 from contextlib import asynccontextmanager
 
 _app_logger = logging.getLogger("app")
@@ -22,16 +23,23 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from urllib.parse import quote
 
 from app.config import settings
 from app.api import auth, conversations, chat, export
 from app.core.dependencies import get_current_user
+from app.database import get_db
 from app.graph.builder import build_graph
 from app.models.user import User
 from app.rag.form_lookup import get_form_path
+from app.services.conversation_service import get_conversation
 from app.services.form_fill_writer import get_filled_path
+
+# 已填寫檔名格式：<conversation_id>_<form_id>_<timestamp>.docx
+# conversation_id 為標準 UUID（含連字號，無底線），所以以第一個 "_" 為分界即可取出
+_UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 
 from pathlib import Path
 
@@ -53,6 +61,7 @@ async def lifespan(app: FastAPI):
         checkpointer = AsyncSqliteSaver(conn)
         await checkpointer.setup()                   # 建立 langgraph.db 所需 tables
         app.state.graph = build_graph(checkpointer=checkpointer)
+        app.state.checkpointer = checkpointer        # 供 conversation 刪除時清 thread state
 
         print(f"[Startup] APP_ENV={settings.app_env}")
         print(f"[Startup] DATABASE_URL={settings.database_url}")
@@ -158,11 +167,29 @@ async def download_form(
 async def download_filled_form(
     token: str,
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
-    """下載 agent 已填寫的表單 .docx。token 為 form_fill_session.filled_token（檔名）。"""
+    """下載 agent 已填寫的表單 .docx。
+
+    權限：token 中的 conversation_id 必須屬於當前使用者；否則 404（避免洩露存在性）。
+    """
+    # 1. token 解析：conv_id 為第一個 '_' 之前的 UUID
+    parts = token.split("_", 1)
+    if len(parts) < 2 or not _UUID_RE.match(parts[0]):
+        raise HTTPException(status_code=404, detail="Filled form not found")
+    conv_id = parts[0]
+
+    # 2. 所屬權驗證（get_conversation 失敗即 404）
+    try:
+        await get_conversation(db, conv_id, str(current_user.id))
+    except HTTPException:
+        # 對話不存在或不屬於使用者 → 統一回 404 不洩露細節
+        raise HTTPException(status_code=404, detail="Filled form not found")
+
+    # 3. 取檔
     path = get_filled_path(token)
     if path is None:
-        raise HTTPException(status_code=404, detail=f"Filled form not found: {token}")
+        raise HTTPException(status_code=404, detail="Filled form not found")
     encoded_name = quote(path.name, safe="")
     return FileResponse(
         str(path),

@@ -105,11 +105,44 @@ async def delete_conversation(
     db: AsyncSession,
     conversation_id: str,
     user_id: str,
+    *,
+    checkpointer=None,
 ) -> None:
-    """刪除對話（CASCADE 刪除訊息與摘要）"""
+    """刪除對話。
+
+    步驟：
+      1. SQL CASCADE 刪 conversation / messages / summary（authoritative）
+      2. best-effort 清理 generated_forms 內所屬的 .docx（失敗只記 log）
+      3. best-effort 清理 LangGraph checkpoint thread state（若 checkpointer 提供）
+
+    Args:
+        checkpointer: AsyncSqliteSaver；由 API 端從 app.state 傳入。
+                       為 None 時不清 checkpoint（測試 / fallback）。
+    """
+    import logging
+
+    from app.services.form_fill_writer import delete_generated_for_conversation
+
+    logger = logging.getLogger(__name__)
+
+    # 先驗證所有權，避免越權刪除任何側邊資料
     conv = await get_conversation(db, conversation_id, user_id)
+
     await db.delete(conv)
     await db.commit()
+
+    # 側邊資料清理（任何錯誤都不應該回滾 SQL；對話已刪掉）
+    try:
+        delete_generated_for_conversation(conversation_id)
+    except Exception:
+        logger.exception("[delete_conversation] generated_forms 清理失敗 conv=%s", conversation_id)
+
+    if checkpointer is not None:
+        try:
+            await checkpointer.adelete_thread(conversation_id)
+            logger.info("[delete_conversation] cleared LangGraph thread %s", conversation_id)
+        except Exception:
+            logger.exception("[delete_conversation] checkpointer 清理失敗 conv=%s", conversation_id)
 
 
 # ── 訊息寫入（Phase 3 LangGraph 節點使用）────────────────────

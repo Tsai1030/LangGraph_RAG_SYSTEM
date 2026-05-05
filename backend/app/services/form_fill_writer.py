@@ -180,3 +180,36 @@ def get_filled_path(token: str) -> Path | None:
         return None
     path = GENERATED_DIR / token
     return path if path.is_file() else None
+
+
+def delete_generated_for_conversation(conversation_id: str) -> int:
+    """
+    刪除 GENERATED_DIR 下所有以 <conversation_id>_ 開頭的 .docx。
+    回傳成功刪除的檔案數；單檔失敗會記 log 但不中斷。
+
+    路徑穿越防護：conversation_id 不接受任何 path separator 或父層引用，
+    避免「..」之類的字串造成 glob 跨目錄。
+    """
+    if not conversation_id or any(c in conversation_id for c in ("/", "\\", "..")):
+        logger.warning("[form_fill] reject conversation_id with path-like chars: %r", conversation_id)
+        return 0
+
+    if not GENERATED_DIR.exists():
+        return 0
+
+    pattern = f"{conversation_id}_*.docx"
+    deleted = 0
+    for path in GENERATED_DIR.glob(pattern):
+        # 二次驗證：解析後仍位於 GENERATED_DIR 內
+        try:
+            resolved = path.resolve()
+            if GENERATED_DIR.resolve() not in resolved.parents:
+                logger.warning("[form_fill] skip path outside GENERATED_DIR: %s", resolved)
+                continue
+            path.unlink()
+            deleted += 1
+        except OSError as exc:
+            logger.warning("[form_fill] failed to delete %s: %s", path.name, exc)
+    if deleted:
+        logger.info("[form_fill] deleted %d generated docx for conversation %s", deleted, conversation_id)
+    return deleted

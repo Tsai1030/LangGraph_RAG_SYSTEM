@@ -54,6 +54,12 @@ _EDIT_TRIGGER_PHRASES = (
     "替換", "重新填", "再填", "修改", "編輯", "改掉",
 )
 
+# 索取動詞（「我要 X」「給我 X」這類無明確下載動詞但仍是要原檔的訊號）
+_REQUEST_VERBS = ("我要", "給我", "請給", "我需要", "麻煩給")
+
+# qa 標記（含這些字眼通常是知識問答而非索取）
+_QA_MARKERS = ("什麼", "為什麼", "為何", "如何", "怎麼", "?", "？", "嗎?", "嗎？")
+
 
 class IntentDecision(BaseModel):
     intent: Literal[
@@ -121,8 +127,12 @@ _SYSTEM_PROMPT = """\
 [B] 訊息：「下載動員開工檢核表」候選：[010101]
   → static_form_download, target_form_id=010101, need_retrieval=false
 
+[B2] 訊息：「我要動員檢核表」候選：[010101]
+  → static_form_download, target_form_id=010101, need_retrieval=false
+  ★「我要 + 候選表名」+ 無 qa 標記（?/什麼/如何） → 視為要原檔，**不可退到 qa**
+
 [C] 訊息：「動員開工是什麼？」候選：[010101]
-  → qa, target_form_id=null（候選會在回答末尾以下載連結提示，不算 static_form_*）
+  → qa, target_form_id=null（含 ?/什麼 → 是知識問答，候選在回答末尾以下載連結輔助）
 
 [D] 訊息：「好我要填寫」候選：[]，session=010101 (collecting)
   → static_form_fill, target_form_id=010101  ★沿用 session id
@@ -137,20 +147,37 @@ _SYSTEM_PROMPT = """\
   → dynamic_form_generate（使用者要新版而非既有靜態表）"""
 
 
+def _resolve_candidates(query: str, recent_messages: list) -> list[dict]:
+    """
+    候選靜態表 = 先看本輪 query 是否命中；命不中再 fallback 看最近對話歷史。
+    解決使用者第二輪只說「我想要填入資訊」（無表名）時，能繼承上一輪提到的表單。
+    """
+    direct = lookup_forms(query)
+    if direct:
+        return direct
+    if not recent_messages:
+        return []
+    history_text = " ".join(
+        m.content[:400]
+        for m in recent_messages
+        if hasattr(m, "content") and isinstance(m.content, str)
+    )
+    return lookup_forms(history_text) if history_text else []
+
+
 async def unified_intent(state: GraphState) -> dict:
     """
     一次 LLM call 完成意圖分類 + 路由決策。
 
     回傳的 state 更新：
-    - intent: 'qa' | 'static_form_download' | 'dynamic_form_generate' | 'form_continuation'
+    - intent: 'qa' | 'static_form_download' | 'static_form_fill' | 'dynamic_form_generate' | 'form_continuation'
     - need_retrieval: bool
-    - matched_forms: list[dict]   （static_form_download 留命中那份；qa 留候選用於下載提示；其他清空）
-    - form_explicit: bool         （intent=static_form_download 時 True）
+    - matched_forms: list[dict]
+    - form_explicit: bool         （intent=static_form_* 時 True）
     - is_form_continuation: bool
     - retrieval_query: Optional[str]  （form_continuation 時設為 retrieval_topic）
     """
     query = state["query"]
-    candidates = lookup_forms(query)
 
     messages = state.get("messages", [])
     prior = [m for m in messages[:-1] if isinstance(m, (HumanMessage, AIMessage))]
@@ -159,6 +186,9 @@ async def unified_intent(state: GraphState) -> dict:
     prev_form_data = state.get("prev_form_data")
     fill_session = state.get("form_fill_session") or {}
     active_fill = fill_session.get("status") == "collecting"
+
+    # 候選靜態表：本輪命中 → 命不中時 fallback 對話歷史
+    candidates = _resolve_candidates(query, recent)
 
     # 快速路徑 1：首輪、無候選表、無前輪表單、無進行中填表 → 直接 qa
     if not has_prior_ai and not candidates and not prev_form_data and not active_fill:
@@ -173,6 +203,8 @@ async def unified_intent(state: GraphState) -> dict:
     has_fill_phrase = any(p in query for p in _FILL_TRIGGER_PHRASES)
     has_download_phrase = any(p in query for p in _DOWNLOAD_TRIGGER_PHRASES)
     has_edit_phrase = any(p in query for p in _EDIT_TRIGGER_PHRASES)
+    has_request_verb = any(v in query for v in _REQUEST_VERBS)
+    has_qa_marker = any(m in query for m in _QA_MARKERS)
     completed_session = fill_session.get("status") == "completed"
 
     # 快速路徑 2：候選非空 + 明確「填」動詞 + 無「下載」動詞 → 直接 static_form_fill
@@ -185,6 +217,28 @@ async def unified_intent(state: GraphState) -> dict:
         )
         return {
             "intent": "static_form_fill",
+            "need_retrieval": False,
+            "matched_forms": [target],
+            "form_explicit": True,
+            "is_form_continuation": False,
+        }
+
+    # 快速路徑 2.5：候選非空 + 索取動詞（我要/給我）+ 無 fill/download/qa 標記 → static_form_download
+    # 處理「我要動員檢核表」這種沒有「填」「下載」明示動詞、也不是知識問答的索取訊息
+    if (
+        candidates
+        and has_request_verb
+        and not has_fill_phrase
+        and not has_download_phrase
+        and not has_qa_marker
+    ):
+        target = candidates[0]
+        logger.info(
+            "[unified_intent] fast-path 2.5 → static_form_download (request verb), target=%s",
+            target["form_id"],
+        )
+        return {
+            "intent": "static_form_download",
             "need_retrieval": False,
             "matched_forms": [target],
             "form_explicit": True,

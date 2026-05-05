@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_current_user
@@ -81,8 +81,15 @@ async def rename_conversation_endpoint(
 
 @router.delete("/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_conversation_endpoint(
+    request: Request,
     conversation_id: str,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await delete_conversation(db, conversation_id, current_user.id)
+    checkpointer = getattr(request.app.state, "checkpointer", None)
+    await delete_conversation(
+        db,
+        conversation_id,
+        current_user.id,
+        checkpointer=checkpointer,
+    )
