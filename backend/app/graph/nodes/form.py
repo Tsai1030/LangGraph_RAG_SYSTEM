@@ -82,11 +82,18 @@ async def form_structurer(state: GraphState) -> dict:
     if prev_form_data:
         prev_rows = prev_form_data.get("rows", [])
         prev_hint = (
-            f"\n\n【前一輪已生成的表單】（請勿重複相同內容，但保持相同 form_type、columns 格式與主題）：\n"
+            f"\n\n【前一輪已生成的表單】（參考資料，依本輪需求決定要延續還是改寫）：\n"
             f"標題：{prev_form_data.get('title', '')}\n"
-            f"欄位：{prev_form_data.get('columns', [])}\n"
-            f"已有 {len(prev_rows)} 列資料，以下為前幾列範例：\n"
+            f"form_type：{prev_form_data.get('form_type', '')}\n"
+            f"欄位 columns：{prev_form_data.get('columns', [])}\n"
+            f"已有 {len(prev_rows)} 列，前幾列範例：\n"
             + _json.dumps(prev_rows[:3], ensure_ascii=False)
+            + "\n\n判斷規則（看使用者需求）："
+            + "\n- 「再來幾組」「多出幾題」「繼續做」等延續訊號 → 保留 form_type 與 columns，"
+            + "新增與既有列**不重複**的內容"
+            + "\n- 「改成 X 題型」「換成 Y 格式」「加入欄位 Z」等變更訊號 → 依新需求重新設計 "
+            + "form_type / columns / rows，沿用主題但**重新生成表格**（不被舊 columns 綁死）"
+            + "\n- 兩者皆非時，以使用者本輪需求為主"
         )
 
     user_content = (
