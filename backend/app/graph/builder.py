@@ -43,6 +43,7 @@ logger = logging.getLogger(__name__)
 from app.graph.nodes.compact import compact_check, summarizer
 from app.graph.nodes.context import context_builder
 from app.graph.nodes.form import form_structurer
+from app.graph.nodes.form_exporter import form_exporter
 from app.graph.nodes.form_fill import (
     form_fill_collector,
     form_filler,
@@ -69,6 +70,7 @@ def _route_intent(state: GraphState) -> Union[str, list[str]]:
     unified_intent 後的路由：
     - static_form_download → 並行直接回 responder ∥ source_filter（無需檢索）
     - static_form_fill → form_template_loader（進入填表流程）
+    - dynamic_form_export → form_exporter（不打 LLM 直接轉檔）→ responder
     - 任何意圖 + need_retrieval=True → retriever（含 form 生成類）
     - 否則 → 並行 responder ∥ source_filter
     """
@@ -77,6 +79,8 @@ def _route_intent(state: GraphState) -> Union[str, list[str]]:
         return ["responder", "source_filter"]
     if intent == "static_form_fill":
         return "form_template_loader"
+    if intent == "dynamic_form_export":
+        return "form_exporter"
     if state.get("need_retrieval", True):
         return "retriever"
     return ["responder", "source_filter"]
@@ -131,6 +135,7 @@ def build_graph(checkpointer=None):
     graph.add_node("form_template_loader", form_template_loader)
     graph.add_node("form_fill_collector", form_fill_collector)
     graph.add_node("form_filler", form_filler)
+    graph.add_node("form_exporter", form_exporter)
     graph.add_node("responder", responder)
     graph.add_node("source_filter", source_filter)
 
@@ -164,6 +169,9 @@ def build_graph(checkpointer=None):
     graph.add_edge("form_template_loader", "form_fill_collector")
     graph.add_conditional_edges("form_fill_collector", _route_after_collector)
     graph.add_edge("form_filler", "responder")
+
+    # 動態表單匯出：form_exporter → responder（短確認）
+    graph.add_edge("form_exporter", "responder")
 
     # 並行分支匯入 END（LangGraph fan-in 自動等待兩者完成）
     graph.add_edge("responder", END)

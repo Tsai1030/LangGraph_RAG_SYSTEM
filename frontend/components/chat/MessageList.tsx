@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import type { MessageOut, FormData as FormDataType, FormFile, Source } from "@/types";
+import type { MessageOut, FormFile, Source } from "@/types";
 import MessageBubble from "./MessageBubble";
 
 const SUGGESTIONS = [
@@ -16,7 +16,6 @@ const SUGGESTIONS = [
 interface Props {
   messages: MessageOut[];
   streamingMessage: MessageOut | null;
-  streamingFormData: FormDataType | null;
   streamingFormFiles: FormFile[];
   streamingSources: Source[];
   isFormLoading?: boolean;
@@ -69,7 +68,7 @@ function LoadingSkeleton() {
 }
 
 export default function MessageList({
-  messages, streamingMessage, streamingFormData, streamingFormFiles,
+  messages, streamingMessage, streamingFormFiles,
   streamingSources, isFormLoading = false, onSuggestedQuery, loading = false,
   onAtBottomChange, scrollToBottomRef,
 }: Props) {
@@ -139,7 +138,6 @@ export default function MessageList({
                 message={streamingMessage}
                 isStreaming
                 isFormLoading={isFormLoading}
-                streamingFormData={streamingFormData}
                 streamingFormFiles={streamingFormFiles}
                 streamingSources={streamingSources}
               />

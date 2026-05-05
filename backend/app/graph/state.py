@@ -62,6 +62,11 @@ class GraphState(TypedDict):
     prev_form_data: Optional[dict]  # 最近一輪生成的表單（供延續生成時避免重複、保持格式一致）
     is_form_continuation: bool      # True = router 判定為延續上一輪表單，intent 直接 fast-path
 
+    # ── 動態表單匯出 ───────────────────────────────────────────
+    # intent=dynamic_form_export 時設定；form_exporter 節點讀取後產出 .xlsx / .csv
+    export_format: Optional[str]    # 'xlsx' | 'csv'
+    exported_form_file: Optional[dict]  # {form_id, display_name, download_url}（成功匯出後設）
+
     # ── 靜態表單填寫 session（多輪持久化）──────────────────────
     # 由 checkpointer 自動跨輪保留，form_template_loader / form_fill_collector / form_filler 共同維護
     # {

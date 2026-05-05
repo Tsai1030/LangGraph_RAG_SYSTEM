@@ -276,25 +276,29 @@ class TestBuildStateUpdate:
 
 
 # ──────────────────────────────────────────────────────────────────
-# unified_intent — 主入口（含 cold-start 與 LLM-mocked 整合）
+# unified_intent — 主入口（每輪都打 LLM；mocked LLM 整合）
 # ──────────────────────────────────────────────────────────────────
 
-class TestUnifiedIntentColdStart:
+class TestUnifiedIntentAlwaysCallsLLM:
+    """確保每輪都打 LLM，不再有「冷啟動 → qa」fast-path。
+    （首輪也可能是 dynamic_form_generate 等請求，硬性 fast-path 會誤判）"""
+
     @pytest.mark.asyncio
-    async def test_cold_start_returns_qa_without_llm(self):
-        """首輪 + 無候選 + 無前輪表單 + 無 session → qa，且不應建立 LLM"""
-        state = _state("第一個問題")
-        with patch("app.graph.nodes.unified_intent.ChatOpenAI") as mock_llm:
+    async def test_first_turn_calls_llm(self):
+        """首輪 + 無候選 + 無前輪表單 + 無 session → 仍然打 LLM 由模型判斷"""
+        decision = _decision("dynamic_form_generate", need_retrieval=True)
+        state = _state("做一份新人是非題表格")
+
+        ctx, mock_llm = _patch_llm(decision)
+        with ctx:
             result = await unified_intent(state)
 
-        assert result["intent"] == "qa"
-        assert result["need_retrieval"] is True
-        assert result["matched_forms"] == []
-        mock_llm.assert_not_called()
+        assert result["intent"] == "dynamic_form_generate"
+        mock_llm.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_active_session_skips_cold_start(self):
-        """有 active session 即使首輪也要走 LLM（不能 fast-return qa）"""
+    async def test_active_session_calls_llm(self):
+        """有 active session 也走 LLM"""
         decision = _decision("static_form_fill", target_form_id="010101")
         state = _state("OK")
         state["form_fill_session"] = {"target_form_id": "010101", "status": "collecting", "collected": {}}

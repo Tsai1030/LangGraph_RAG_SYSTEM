@@ -27,47 +27,72 @@ _SYSTEM_PROMPT_TEMPLATE = """\
    - 引用圖片時**只能**用 Markdown 語法：![圖片說明](路徑)，路徑維持 /api/images/... 不變
    - **禁止**寫出「圖片路徑：」、「IMG-XXX」、圖片 ID 等純文字標籤
    - 當圖片能直接輔助說明時再引用，每次回答通常 1–3 張為宜，不需逐一列出所有圖片
-6. 若本次已生成表單，**只需一句話確認**（例如：「已為您生成《標題》，請點選下方按鈕下載。」），**嚴禁**在文字中重複輸出表格、欄位名稱或條列式資料
+6. 若本次已生成動態表單（將在 [本次表單] 區塊提供 columns / rows）：
+   - 用 **Markdown 表格語法**直接寫進回答中，讓使用者一眼看到完整表格內容
+   - 用 `### 表單標題` 起頭；columns 用 `| 欄位1 | 欄位2 | ... |` 開頭，下一行 `|---|---|...|` 分隔
+   - 每一列照 columns 順序輸出 row 的值
+   - **末段務必加一句**：「如需匯出為 Excel 或 CSV 下載，請告訴我格式即可。」
+   - 嚴禁省略表格內容只說「已生成《標題》」這類確認語
 7. 若使用者問題不在文件範圍內，明確說明「目前知識庫未涵蓋此資訊」
 8. 使用繁體中文，語氣專業但自然口語
 9. **禁止**使用「依文件」、「文件中提到」、「文件明確指出」、「根據文件」、「依據文件」等引用性措辭，直接陳述內容
 
 {summary_section}
 [參考文件]
-{context}"""
+{context}{form_section}"""
+
+_DYNAMIC_FORM_EXPORT_DONE_SYSTEM = """\
+動態表單已匯出為下載檔。請用一句繁體中文（30字內）告知使用者並提示點擊下方下載。
+範例：「已將《標題》匯出為 Excel，請點選下方下載。」
+直接從「已將」或「已為您匯出」開始；禁止確認語。"""
+
+
+def _build_form_section(form_data: dict) -> str:
+    """把動態表單的完整內容包進 prompt，讓 LLM 用 markdown 表格輸出。"""
+    import json as _json
+
+    title = form_data.get("title", "表單")
+    columns = form_data.get("columns", [])
+    rows = form_data.get("rows", [])
+    subtitle = form_data.get("subtitle") or ""
+    notes = form_data.get("notes") or ""
+
+    return (
+        f"\n\n[本次表單]\n"
+        f"title：{title}\n"
+        + (f"subtitle：{subtitle}\n" if subtitle else "")
+        + f"columns：{_json.dumps(columns, ensure_ascii=False)}\n"
+        + f"rows（共 {len(rows)} 列）：\n"
+        + _json.dumps(rows, ensure_ascii=False, indent=2)
+        + (f"\nnotes：{notes}" if notes else "")
+        + "\n（請依 system prompt 規則 6 用 markdown 表格輸出此表單）"
+    )
 
 
 def _build_messages(state: GraphState) -> list[BaseMessage]:
     """
     組裝送給 LLM 的訊息列表：
-    [System(RAG context + summary)] + [對話歷史中的 human/ai 訊息]
-
-    注意：只取 HumanMessage / AIMessage，排除 SystemMessage，
-    避免 compact 後的 system summary 重複出現。
+    [System(RAG context + summary + form_data)] + [對話歷史中的 human/ai 訊息]
     """
     summary = state.get("summary")
     summary_section = f"[前情摘要]\n{summary}\n" if summary else ""
 
-    # 動態表單提示（若本次有生成 form_structurer 表單）
     form_data = state.get("form_data")
-    form_hint = ""
-    if form_data:
-        title = form_data.get("title", "表單")
-        row_count = len(form_data.get("rows", []))
-        form_hint = f"\n[本次已生成表單：「{title}」，共 {row_count} 筆資料]"
+    form_section = _build_form_section(form_data) if form_data else ""
 
     # QA 模式且有匹配靜態表單 → 在回答末尾加提示
     matched_forms = state.get("matched_forms", [])
     form_explicit = state.get("form_explicit", False)
     form_offer_hint = ""
-    if matched_forms and not form_explicit:
+    if matched_forms and not form_explicit and not form_data:
         names = "、".join(f"《{f['display_name']}》" for f in matched_forms)
         form_offer_hint = f"\n[表單提示]\n回答結束後，在最後一行加上一句：「如需相關作業表單，可點擊下方 {names} 下載。」"
 
     system_content = _SYSTEM_PROMPT_TEMPLATE.format(
         summary_section=summary_section,
         context=state.get("context") or "（無相關文件）",
-    ) + form_hint + form_offer_hint
+        form_section=form_section,
+    ) + form_offer_hint
 
     msgs: list[BaseMessage] = [SystemMessage(content=system_content)]
 
@@ -193,6 +218,24 @@ async def responder(state: GraphState) -> dict:
             HumanMessage(content=_build_fill_collect_user(state)),
         ])
         return {"response": resp.content, "messages": [AIMessage(content=resp.content)]}
+
+    # ── 動態表單匯出：短確認句 ─────────────────────────────
+    if intent == "dynamic_form_export":
+        exported = state.get("exported_form_file") or {}
+        title = exported.get("display_name") or "表單"
+        if exported:
+            llm = ChatOpenAI(
+                model=settings.grader_model,
+                api_key=settings.openai_api_key,
+                temperature=0,
+                streaming=True,
+            )
+            resp = await llm.ainvoke([
+                SystemMessage(content=_DYNAMIC_FORM_EXPORT_DONE_SYSTEM),
+                HumanMessage(content=f"匯出檔：{title}"),
+            ])
+            return {"response": resp.content, "messages": [AIMessage(content=resp.content)]}
+        # 匯出失敗（無 prev_form_data 等）→ 落入下方一般 RAG 路徑提供錯誤訊息
 
     # ── 靜態表單下載：短確認句 ─────────────────────────────
     if intent == "static_form_download" and form_explicit and matched_forms:

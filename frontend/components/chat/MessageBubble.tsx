@@ -7,10 +7,8 @@ import remarkGfm from "remark-gfm";
 import type { Components } from "react-markdown";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { MessageOut, FormData as FormDataType, FormFile, Source } from "@/types";
+import type { MessageOut, FormFile, Source } from "@/types";
 import SourcesPanel from "./SourcesPanel";
-import FormPreview from "@/components/form/FormPreview";
-import ExportButton from "@/components/form/ExportButton";
 import FormFileCard from "./FormFileCard";
 
 interface Props {
@@ -18,7 +16,6 @@ interface Props {
   isStreaming?: boolean;
   isFormLoading?: boolean;
   streamingSources?: Source[];
-  streamingFormData?: FormDataType | null;
   streamingFormFiles?: FormFile[];
 }
 
@@ -77,47 +74,6 @@ function createMarkdownComponents(onImageClick: (src: string, alt: string) => vo
   };
 }
 
-const FORM_LOADING_MESSAGES = [
-  "正在分析表單需求...",
-  "正在生成輸入欄位...",
-  "正在套用樣式設定...",
-  "即將完成...",
-];
-
-function FormLoadingCard() {
-  const [index, setIndex] = useState(0);
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setIndex((prev) => (prev + 1) % FORM_LOADING_MESSAGES.length);
-    }, 2500);
-    return () => clearInterval(timer);
-  }, []);
-
-  return (
-    <div className="w-full rounded-xl border border-zinc-200 bg-white p-4 mb-3 shadow-sm">
-      <div className="flex items-center gap-3 mb-4 pb-3 border-b border-zinc-100">
-        <div className="size-4 shrink-0 rounded-full border-2 border-zinc-200 border-t-zinc-500 animate-spin" />
-        <div className="h-5 overflow-hidden flex-1 relative">
-          <span key={index} className="absolute text-sm font-medium text-zinc-500 animate-slide-up">
-            {FORM_LOADING_MESSAGES[index]}
-          </span>
-        </div>
-      </div>
-      <div className="space-y-4 animate-pulse">
-        <div className="flex items-center gap-3">
-          <div className="h-4 w-24 rounded bg-zinc-200" />
-        </div>
-        <div className="h-10 w-full rounded-lg bg-zinc-100" />
-        <div className="flex items-center gap-2">
-          <div className="size-4 rounded-full bg-zinc-200" />
-          <div className="h-3 w-48 rounded bg-zinc-100" />
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function ThinkingText() {
   return (
     <span className="text-sm font-medium tracking-wide thinking-gradient select-none">
@@ -126,13 +82,19 @@ function ThinkingText() {
   );
 }
 
+function GeneratingTableText() {
+  return (
+    <span className="text-sm font-medium tracking-wide thinking-gradient select-none">
+      Generating table…
+    </span>
+  );
+}
+
 export default function MessageBubble({
-  message, isStreaming = false, isFormLoading = false, streamingSources, streamingFormData, streamingFormFiles,
+  message, isStreaming = false, isFormLoading = false, streamingSources, streamingFormFiles,
 }: Props) {
   const isUser = message.role === "user";
   const sources: Source[] = streamingSources ?? message.meta?.sources ?? [];
-  const formData: FormDataType | null | undefined =
-    streamingFormData !== undefined ? streamingFormData : message.meta?.form_data;
   const formFiles: FormFile[] =
     streamingFormFiles !== undefined ? (streamingFormFiles ?? []) : (message.meta?.form_files ?? []);
 
@@ -159,31 +121,22 @@ export default function MessageBubble({
       )}
       <div className="flex items-start px-4 md:px-6 animate-fade-up">
         <div className="flex-1 min-w-0 pb-1">
-          {/* Form loading card — shown before text while form_structurer is running */}
-          {isFormLoading && !formData && <FormLoadingCard />}
-
-          {/* Form preview — shown before text once form_data arrives */}
-          {formData && (
-            <div className="mb-3">
-              <FormPreview formData={formData} />
-              <ExportButton formData={formData} filename={formData.title} />
-            </div>
-          )}
-
-          {/* Message content */}
-          <div className={cn("prose-chat text-[15px]", isStreaming && !message.content && !isFormLoading && "py-1")}>
+          {/* Message content（含動態表單的 markdown 表格 — 由 backend 寫進 content）*/}
+          <div className={cn("prose-chat text-[15px]", isStreaming && !message.content && "py-1")}>
             {message.content ? (
               <div className={cn(isStreaming && "streaming-cursor")}>
                 <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
                   {message.content}
                 </ReactMarkdown>
               </div>
-            ) : !isFormLoading ? (
+            ) : isFormLoading ? (
+              <GeneratingTableText />
+            ) : (
               <ThinkingText />
-            ) : null}
+            )}
           </div>
 
-          {/* Static form download cards */}
+          {/* 表單下載卡（靜態下載 / 已填寫 / 動態匯出）*/}
           {formFiles.length > 0 && !isStreaming && (
             <div className="mt-3 flex flex-col gap-2">
               {formFiles.map((f) => (

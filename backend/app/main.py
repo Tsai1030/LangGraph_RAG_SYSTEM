@@ -1,4 +1,5 @@
 import logging
+import mimetypes
 import os
 import re
 from contextlib import asynccontextmanager
@@ -192,14 +193,17 @@ async def download_filled_form(
         # 對話不存在或不屬於使用者 → 統一回 404 不洩露細節
         raise HTTPException(status_code=404, detail="Filled form not found")
 
-    # 3. 取檔
+    # 3. 取檔，依副檔名選擇 mime type（同一 endpoint 服務 docx / xlsx / csv 三種）
     path = get_filled_path(token)
     if path is None:
         raise HTTPException(status_code=404, detail="Filled form not found")
+    mime, _ = mimetypes.guess_type(path.name)
+    if mime is None:
+        mime = "application/octet-stream"
     encoded_name = quote(path.name, safe="")
     return FileResponse(
         str(path),
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        media_type=mime,
         filename=path.name,
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_name}"},
     )

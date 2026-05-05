@@ -30,7 +30,6 @@ export interface MessageOut {
 
 export interface MessageMeta {
   sources?: Source[];
-  form_data?: FormData;
   form_files?: FormFile[];
   token_count?: number;
 }
@@ -53,17 +52,7 @@ export interface Source {
   tags: string[];
 }
 
-// Form / Export
-export interface FormData {
-  form_type: "checklist" | "report" | "plan" | "table";
-  title: string;
-  subtitle?: string;
-  columns: string[];
-  rows: Record<string, string>[];
-  notes?: string;
-}
-
-// Static Form Files
+// 表單下載卡（靜態空白檔 / 已填寫靜態表 / 動態匯出檔皆共用此型）
 export interface FormFile {
   form_id: string;
   display_name: string;
@@ -73,7 +62,6 @@ export interface FormFile {
 // SSE Events
 export type SSEEvent =
   | { type: "text"; content: string }
-  | { type: "form"; data: FormData }
   | { type: "form_files"; data: FormFile[] }
   | { type: "sources"; data: Source[] }
   | { type: "done" };

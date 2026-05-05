@@ -22,6 +22,9 @@ scripts/output/
 # Alembic (keep versions/, ignore pycache)
 alembic/__pycache__/
 
-# Filled form artifacts（由 form_fill_writer.write_filled_docx 寫入的使用者私人填寫副本）
+# Filled form artifacts（form_fill_writer 寫入的使用者私人填寫副本，
+# 以及 dynamic_form_export 產出的 Excel / CSV）
 data/generated_forms/*.docx
+data/generated_forms/*.xlsx
+data/generated_forms/*.csv
 !data/generated_forms/.gitkeep

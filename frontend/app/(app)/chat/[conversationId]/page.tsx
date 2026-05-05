@@ -11,7 +11,6 @@ import MessageList from "@/components/chat/MessageList";
 import InputBar from "@/components/chat/InputBar";
 import type {
   ConversationDetail,
-  FormData as FormDataType,
   MessageOut,
   Source,
 } from "@/types";
@@ -29,7 +28,6 @@ export default function ChatPage() {
     startStreaming,
     appendStreamingText,
     setStreamingFormLoading,
-    setStreamingFormData,
     setStreamingFormFiles,
     setStreamingSources,
     clearStreaming,
@@ -49,7 +47,6 @@ export default function ChatPage() {
   const isStreaming = streamingState?.isStreaming ?? false;
   const isFormLoading = streamingState?.isFormLoading ?? false;
   const streamingMessage = streamingState?.streamingMessage ?? null;
-  const streamingFormData = streamingState?.streamingFormData ?? null;
   const streamingFormFiles = streamingState?.streamingFormFiles ?? [];
   const streamingSources = streamingState?.streamingSources ?? [];
 
@@ -125,7 +122,6 @@ export default function ChatPage() {
 
       let accumulated = "";
       let latestSources: Source[] = [];
-      let latestFormData: FormDataType | null = null;
       let latestFormFiles: NonNullable<MessageOut["meta"]>["form_files"] = [];
 
       try {
@@ -138,10 +134,6 @@ export default function ChatPage() {
           },
           () => {
             setStreamingFormLoading(conversationId, true);
-          },
-          (formData) => {
-            latestFormData = formData;
-            setStreamingFormData(conversationId, formData);
           },
           (files) => {
             latestFormFiles = files;
@@ -158,7 +150,6 @@ export default function ChatPage() {
               content: accumulated,
               meta: {
                 sources: latestSources,
-                form_data: latestFormData ?? undefined,
                 form_files: latestFormFiles?.length ? latestFormFiles : undefined,
               },
               created_at: new Date().toISOString(),
@@ -188,7 +179,21 @@ export default function ChatPage() {
             appendMessage({
               id: assistantId,
               role: "assistant",
-              content: "The server is busy. Please try again.",
+              content: "The server is busy. Please try again later.",
+              meta: null,
+              created_at: new Date().toISOString(),
+            });
+          }
+          return;
+        }
+
+        // STREAM_ERROR：後端 graph 內部例外（已被 chat.py 的 try/except 捕捉並 emit error 事件）
+        if (err instanceof Error && err.message === "STREAM_ERROR") {
+          if (activeConversationRef.current === conversationId) {
+            appendMessage({
+              id: assistantId,
+              role: "assistant",
+              content: "Something went wrong. Please try again later.",
               meta: null,
               created_at: new Date().toISOString(),
             });
@@ -201,7 +206,7 @@ export default function ChatPage() {
             appendMessage({
               id: assistantId,
               role: "assistant",
-              content: accumulated || "Something went wrong. Please try again.",
+              content: accumulated || "Something went wrong. Please try again later.",
               meta: null,
               created_at: new Date().toISOString(),
             });
@@ -218,7 +223,6 @@ export default function ChatPage() {
       startStreaming,
       appendStreamingText,
       setStreamingFormLoading,
-      setStreamingFormData,
       setStreamingFormFiles,
       setStreamingSources,
       clearStreaming,
@@ -243,7 +247,6 @@ export default function ChatPage() {
       <MessageList
         messages={messages}
         streamingMessage={streamingMessage}
-        streamingFormData={streamingFormData}
         streamingFormFiles={streamingFormFiles}
         streamingSources={streamingSources}
         isFormLoading={isFormLoading}

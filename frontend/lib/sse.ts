@@ -1,5 +1,5 @@
 import { getAccessToken, useAuthStore } from "@/store/authStore";
-import type { FormData, FormFile, Source } from "@/types";
+import type { FormFile, Source } from "@/types";
 
 async function attemptTokenRefresh(): Promise<string> {
   const res = await fetch("/api/auth/refresh", {
@@ -18,7 +18,6 @@ export async function streamChat(
   message: string,
   onText: (text: string) => void,
   onFormLoading: () => void,
-  onForm: (formData: FormData) => void,
   onFormFiles: (files: FormFile[]) => void,
   onSources: (sources: Source[]) => void,
   onDone: () => void,
@@ -85,15 +84,15 @@ export async function streamChat(
         case "form_loading":
           onFormLoading();
           break;
-        case "form":
-          onForm(event.data);
-          break;
         case "form_files":
           onFormFiles(event.data);
           break;
         case "sources":
           onSources(event.data);
           break;
+        case "error":
+          // 後端 graph 內部錯誤 → 中斷 stream，由 page.tsx 的 catch 處理顯示
+          throw new Error("STREAM_ERROR");
         case "done":
           onDone();
           return;

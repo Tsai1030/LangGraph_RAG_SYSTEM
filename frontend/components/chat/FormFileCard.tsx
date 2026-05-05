@@ -9,8 +9,21 @@ interface Props {
   file: FormFile;
 }
 
+/** 從 download_url 取出實際副檔名（小寫，預設 docx）。 */
+function extOf(url: string): string {
+  const m = url.match(/\.([a-z0-9]{1,5})(?:[?#]|$)/i);
+  return (m?.[1] ?? "docx").toLowerCase();
+}
+
+/** 移除顯示名末尾的 「（XLSX）」「（CSV）」這類格式標記，避免下載檔名重複。 */
+function stripFormatSuffix(name: string): string {
+  return name.replace(/[（(]\s*(?:XLSX|CSV|DOCX)\s*[)）]\s*$/i, "").trim();
+}
+
 export default function FormFileCard({ file }: Props) {
   const [downloading, setDownloading] = useState(false);
+  const ext = extOf(file.download_url);
+  const cleanName = stripFormatSuffix(file.display_name);
 
   const handleDownload = async () => {
     if (downloading) return;
@@ -26,7 +39,7 @@ export default function FormFileCard({ file }: Props) {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${file.display_name}.docx`;
+      a.download = `${cleanName}.${ext}`;
       a.click();
       URL.revokeObjectURL(url);
     } finally {
@@ -47,7 +60,7 @@ export default function FormFileCard({ file }: Props) {
         <p className="text-[13px] font-medium text-zinc-800 truncate">
           {file.display_name}
         </p>
-        <p className="text-[11px] text-zinc-400 mt-0.5">點擊下載 .docx</p>
+        <p className="text-[11px] text-zinc-400 mt-0.5">點擊下載 .{ext}</p>
       </div>
       <Download
         size={14}

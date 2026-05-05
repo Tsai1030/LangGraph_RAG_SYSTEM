@@ -1,7 +1,6 @@
 import { create } from "zustand";
 import type {
   ConversationOut,
-  FormData,
   FormFile,
   MessageOut,
   Source,
@@ -11,7 +10,6 @@ interface ConversationStreamingState {
   isStreaming: boolean;
   isFormLoading: boolean;
   streamingMessage: MessageOut | null;
-  streamingFormData: FormData | null;
   streamingFormFiles: FormFile[];
   streamingSources: Source[];
 }
@@ -35,7 +33,6 @@ interface ChatState {
   startStreaming: (conversationId: string, message: MessageOut) => void;
   appendStreamingText: (conversationId: string, chunk: string) => void;
   setStreamingFormLoading: (conversationId: string, loading: boolean) => void;
-  setStreamingFormData: (conversationId: string, data: FormData | null) => void;
   setStreamingFormFiles: (conversationId: string, files: FormFile[]) => void;
   setStreamingSources: (conversationId: string, sources: Source[]) => void;
   clearStreaming: (conversationId: string) => void;
@@ -81,7 +78,6 @@ export const useChatStore = create<ChatState>((set) => ({
           isStreaming: true,
           isFormLoading: false,
           streamingMessage: message,
-          streamingFormData: null,
           streamingFormFiles: [],
           streamingSources: [],
         },
@@ -97,6 +93,8 @@ export const useChatStore = create<ChatState>((set) => ({
           ...s.streamingByConversation,
           [conversationId]: {
             ...current,
+            // 收到 token → 表示生成階段已過、進入回覆階段，自動關掉 loading
+            isFormLoading: false,
             streamingMessage: {
               ...current.streamingMessage,
               content: current.streamingMessage.content + chunk,
@@ -113,21 +111,6 @@ export const useChatStore = create<ChatState>((set) => ({
         streamingByConversation: {
           ...s.streamingByConversation,
           [conversationId]: { ...current, isFormLoading: loading },
-        },
-      };
-    }),
-  setStreamingFormData: (conversationId, data) =>
-    set((s) => {
-      const current = s.streamingByConversation[conversationId];
-      if (!current) return s;
-      return {
-        streamingByConversation: {
-          ...s.streamingByConversation,
-          [conversationId]: {
-            ...current,
-            isFormLoading: false,
-            streamingFormData: data,
-          },
         },
       };
     }),

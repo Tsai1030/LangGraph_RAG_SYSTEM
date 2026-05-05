@@ -144,7 +144,7 @@ async def chat_stream(
                     event_name = event.get("name", "")
                     node_name = event.get("metadata", {}).get("langgraph_node", "")
 
-                    # form_structurer 開始 → 前端顯示「表單生成中」
+                    # form_structurer 開始 → 推送 form_loading 讓前端顯示「Generating table…」
                     if event_type == "on_chain_start" and event_name == "form_structurer":
                         yield (
                             f"data: {json.dumps({'type': 'form_loading'})}\n\n"
@@ -161,8 +161,14 @@ async def chat_stream(
 
             except Exception as exc:
                 had_error = True
+                # 細節記 log；前端只給通用英文錯誤訊息（避免內部訊息洩漏）
+                import logging
+                logging.getLogger("app.chat").exception(
+                    "[chat_stream] graph error in conv=%s: %s",
+                    conversation_id, exc,
+                )
                 yield (
-                    f"data: {json.dumps({'type': 'error', 'content': str(exc)}, ensure_ascii=False)}\n\n"
+                    f"data: {json.dumps({'type': 'error', 'content': 'Internal error'})}\n\n"
                 )
 
             # ── 7. graph 完成後：讀取最終狀態，推送 sources / form ────
@@ -179,18 +185,19 @@ async def chat_stream(
                         f"data: {json.dumps({'type': 'sources', 'data': sources}, ensure_ascii=False)}\n\n"
                     )
 
-                form_data = final_values.get("form_data")
-                if form_data:
-                    yield (
-                        f"data: {json.dumps({'type': 'form', 'data': form_data}, ensure_ascii=False)}\n\n"
-                    )
+                # 動態表單：不再推送結構化 form 事件 — 表格內容已由 responder 寫進 markdown
+                # 動態表單匯出：把 exported_form_file 用 form_files 形式推送
+                # 靜態表單下載 / 靜態表填好：同既有 form_files 機制
 
                 matched_forms = final_values.get("matched_forms", [])
                 fill_session = final_values.get("form_fill_session") or {}
+                exported = final_values.get("exported_form_file")
                 intent = final_values.get("intent")
 
+                if intent == "dynamic_form_export" and exported:
+                    matched_forms = [exported]
                 # 填表完成 → 把已填寫檔案以 form_files 形式推送（前端共用同一 UI 顯示下載按鈕）
-                if (
+                elif (
                     fill_session.get("status") == "completed"
                     and fill_session.get("filled_token")
                 ):
@@ -225,10 +232,10 @@ async def chat_stream(
                         meta: dict = {}
                         if final_values.get("sources"):
                             meta["sources"] = final_values["sources"]
-                        if final_values.get("form_data"):
-                            meta["form_data"] = final_values["form_data"]
+                        # 注意：動態表單內容已寫進 assistant_response（markdown 表格），
+                        # 不再額外存 form_data 到 metadata（前端不渲染 FormPreview 了）
                         if matched_forms:
-                            # 此處 matched_forms 已是上方串流推送過的版本（可能是 filled 版）
+                            # 此處 matched_forms 已是上方串流推送過的版本（filled / exported / 靜態）
                             meta["form_files"] = matched_forms
                         await save_message(
                             save_db,

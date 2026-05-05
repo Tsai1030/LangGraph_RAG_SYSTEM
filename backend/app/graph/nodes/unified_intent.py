@@ -1,21 +1,25 @@
 """
 unified_intent.py — 統一意圖分類節點
 
-設計：純 LLM 判斷 + post-normalization。除了「冷啟動 → qa」這個零成本路徑外，
-所有意圖分類都交給 LLM，由 prompt 與 few-shot 把規則教給模型。
+設計：純 LLM 判斷 + post-normalization。每輪訊息都打一次 LLM，由 prompt 與
+few-shot 把規則教給模型。
 
 為什麼不用 keyword fast-path：
 - 短訊息看字面易誤判（例「我要規範的詳細說明」含「我要」會被誤判成索取靜態檔）
 - keyword 集合會無限膨脹、難維護、難測試組合
-- gpt-5.4 級的模型對五分類已足夠穩定
+- gpt-5.4 級的模型對六分類已足夠穩定
+
+為什麼也不用「冷啟動 → qa」fast-path：
+- 首輪訊息**不一定是 qa**：可能是 dynamic_form_generate（「做一份新人是非題」）、
+  static_form_download（「下載動員開工檢核表」）等
+- 多打一次 LLM（≈300ms）換取每輪都正確分類，比「省一次 LLM 但首輪可能誤判」值得
 
 回傳的 state 更新：
-- intent: qa | static_form_download | static_form_fill | dynamic_form_generate | form_continuation
-- need_retrieval: bool
-- matched_forms: list[dict]   （static_form_*：命中那份；qa：候選表用於下載提示；其他：空）
-- form_explicit: bool          （static_form_* 為 True，supress 一般 RAG prompt 改用短回應）
-- is_form_continuation: bool
-- retrieval_query: Optional[str]   （form_continuation 時帶推斷主題詞）
+- intent: qa | static_form_download | static_form_fill | dynamic_form_generate
+          | form_continuation | dynamic_form_export
+- need_retrieval / matched_forms / form_explicit / is_form_continuation
+- retrieval_query（form_continuation 時帶推斷主題詞）
+- export_format（dynamic_form_export 時帶 xlsx / csv）
 """
 
 from __future__ import annotations
@@ -48,7 +52,12 @@ class IntentDecision(BaseModel):
         "static_form_fill",
         "dynamic_form_generate",
         "form_continuation",
-    ] = Field(description="使用者意圖分類（五選一）")
+        "dynamic_form_export",
+    ] = Field(description="使用者意圖分類（六選一）")
+    export_format: Optional[Literal["xlsx", "csv"]] = Field(
+        default=None,
+        description="若 intent=dynamic_form_export，指定匯出格式；其他情況為 null",
+    )
     target_form_id: Optional[str] = Field(
         default=None,
         description="若 intent=static_form_*，填入候選 form_id；其他情況為 null",
@@ -66,12 +75,13 @@ class IntentDecision(BaseModel):
 _SYSTEM_PROMPT = """\
 你是對話分析助理。依使用者「當前訊息」與「對話脈絡」決定處理方式，並以 JSON 結構化輸出。
 
-【intent 五選一】
+【intent 六選一】
 1. static_form_download — 索取既有靜態表的**空白原檔**下載
 2. static_form_fill     — 把資料**填寫進**既有靜態表（agent 寫好回傳）
 3. dynamic_form_generate — 產生**全新**結構化表單（沒有對應靜態表，或要客製版）
-4. form_continuation     — 延續「上一輪生成過的動態表單」（再來幾組／多出幾題）
-5. qa                    — 詢問知識、規範、流程、解說；無表單意圖
+4. form_continuation     — 延續「上一輪生成過的動態表單」（再來幾組／多出幾題／改題型）
+5. dynamic_form_export   — 把**上一輪已生成的動態表單**轉成 Excel 或 CSV 讓使用者下載（不重新生成內容）
+6. qa                    — 詢問知識、規範、流程、解說；無表單意圖
 
 【決策原則（依序判斷）】
 
@@ -88,9 +98,15 @@ _SYSTEM_PROMPT = """\
 3. 候選靜態表清單為空時，**禁止輸出 static_form_***（除非有 active session）。
 
 4. form_continuation **必要條件**：補充資訊明確標示「上一輪曾生成過動態表單」，
-   且訊息語意是「再多來幾筆」之類延續。retrieval_topic 必填。
+   且訊息語意是「再多來幾筆／改題型」之類**內容延續或改寫**。retrieval_topic 必填。
 
-5. 模糊難判時 → 偏向 qa（保守）；need_retrieval 偏向 true（保守）。
+5. dynamic_form_export **必要條件**：補充資訊有「上一輪曾生成過動態表單」，
+   且訊息明確要把該表轉成可下載檔（「給我 excel」「下載 csv」「匯出」「轉成 xlsx」）。
+   - export_format 必填（xlsx / csv）；訊息含「excel/xlsx」→ xlsx，含「csv」→ csv
+   - 不指定格式時預設 xlsx
+   - 與 form_continuation 區分：export 不重新生成內容，只轉檔；continuation 會改寫表
+
+6. 模糊難判時 → 偏向 qa（保守）；need_retrieval 偏向 true（保守）。
 
 【static_form_fill 的兩種觸發】
 A. **新填**：候選非空 + 訊息語意明確要填寫該表（含「填」「填寫」「協助填」「幫我填」「我要填」）
@@ -138,6 +154,15 @@ B. **續填／編輯**：active 或 completed session 進行中，訊息為：
 
 [K] 「再來五組」 候選=[]，prev_form_data=新人訓練是非題
     → form_continuation / retrieval_topic=新人訓練是非題
+
+[L] 「給我 excel」 候選=[]，prev_form_data=新人知識選擇題
+    → dynamic_form_export / export_format=xlsx / 「明確要轉檔」
+
+[M] 「轉成 csv 下載」 候選=[]，prev_form_data=動員開工檢核表
+    → dynamic_form_export / export_format=csv
+
+[N] 「再做一份選擇題」 候選=[]，prev_form_data=新人知識是非題
+    → form_continuation（不是 export，是要重生表）
 
 reason 用 30 字內中文說明依據。"""
 
@@ -241,6 +266,7 @@ def _normalize_decision(
     - static_form_* 但 target_form_id 不在候選 ∪ session id → 退回 qa
     - static_form_* 但 target 為 null 且有 active/completed session → 沿用 session id
     - form_continuation 但缺 prev_form_data 或 retrieval_topic → 改 dynamic_form_generate
+    - dynamic_form_export 但缺 prev_form_data → 改 qa（沒得轉的表）
     """
     intent = decision.intent
     target_id = decision.target_form_id
@@ -260,6 +286,9 @@ def _normalize_decision(
     if intent == "form_continuation":
         if not prev_form_data or not decision.retrieval_topic:
             intent = "dynamic_form_generate"
+
+    if intent == "dynamic_form_export" and not prev_form_data:
+        intent = "qa"
 
     return intent, target_id
 
@@ -296,6 +325,9 @@ def _build_state_update(
         result["is_form_continuation"] = True
         result["need_retrieval"] = True
         result["retrieval_query"] = decision.retrieval_topic
+    elif intent == "dynamic_form_export":
+        result["need_retrieval"] = False
+        result["export_format"] = decision.export_format or "xlsx"
 
     return result
 
@@ -334,35 +366,18 @@ async def _llm_classify(
 # ──────────────────────────────────────────────────────────────────
 
 async def unified_intent(state: GraphState) -> dict:
-    """主流程：冷啟動快速回傳 → LLM 分類 → 規範化 → 組 state 變更。"""
+    """主流程：每輪都跑 LLM 分類 → 規範化 → 組 state 變更。"""
     query = state["query"]
 
     messages = state.get("messages", [])
     prior = [m for m in messages[:-1] if isinstance(m, (HumanMessage, AIMessage))]
     recent = prior[-(_MAX_HISTORY_TURNS * 2):]
-    has_prior_ai = any(isinstance(m, AIMessage) for m in recent)
     prev_form_data = state.get("prev_form_data")
     fill_session = state.get("form_fill_session") or {}
 
     candidates = _resolve_candidates(query, recent)
 
-    # 冷啟動 fast-path：首輪 + 完全無 form 上下文 → 必為 qa，不打 LLM
-    if (
-        not has_prior_ai
-        and not candidates
-        and not prev_form_data
-        and fill_session.get("status") not in ("collecting", "completed")
-    ):
-        logger.info("[unified_intent] cold-start → qa (no LLM call)")
-        return {
-            "intent": "qa",
-            "need_retrieval": True,
-            "matched_forms": [],
-            "form_explicit": False,
-            "is_form_continuation": False,
-        }
-
-    # LLM 分類
+    # LLM 分類（每輪都打；不再用「首輪→qa」fast-path 因為首輪可能是動態表單請求）
     decision = await _llm_classify(query, candidates, prev_form_data, fill_session, recent)
 
     # 規範化（防 LLM 越界）
