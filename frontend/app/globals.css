@@ -93,6 +93,14 @@
 
 html, body { height: 100%; }
 
+/* Tailwind v4 preflight 把 button 預設 cursor 改成 default；恢復點擊手指游標
+   涵蓋 <button>, [role="button"]（ARIA 按鈕）；用 !important 防被 utility class 蓋掉
+   disabled / aria-disabled 狀態維持瀏覽器預設（讓 disabled:cursor-not-allowed 仍能生效） */
+button:not(:disabled):not([aria-disabled="true"]),
+[role="button"]:not([aria-disabled="true"]) {
+  cursor: pointer !important;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);

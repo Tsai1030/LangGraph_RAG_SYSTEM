@@ -64,3 +64,15 @@ def get_form_meta(form_id: str) -> dict | None:
                 "download_url": f"/api/forms/{form['form_id']}/download",
             }
     return None
+
+
+def list_all_forms() -> list[dict]:
+    """回傳全部靜態表單 metadata（前端表單選單用）。"""
+    return [
+        {
+            "form_id": f["form_id"],
+            "display_name": f["display_name"],
+            "download_url": f"/api/forms/{f['form_id']}/download",
+        }
+        for f in _load_registry()
+    ]

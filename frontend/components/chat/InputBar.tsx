@@ -3,6 +3,7 @@
 import { useRef, useState, useEffect } from "react";
 import { ArrowUp, Square } from "lucide-react";
 import { cn } from "@/lib/utils";
+import FormPickerButton from "./FormPickerButton";
 
 interface Props {
   onSend: (message: string) => void;
@@ -43,9 +44,13 @@ export default function InputBar({ onSend, onStop, isStreaming, disabled }: Prop
     <div className="px-4 pb-4">
       <div className="max-w-3xl mx-auto">
         <div className={cn(
-          "flex items-end gap-2 rounded-4xl border bg-white shadow-sm px-4 py-3 transition-all duration-200",
+          "flex items-end gap-2 rounded-4xl border bg-white shadow-sm px-3 py-3 transition-all duration-200",
           disabled ? "border-zinc-200 opacity-60" : "border-zinc-200 hover:border-zinc-300 focus-within:border-zinc-400 focus-within:shadow-lg"
         )}>
+          <FormPickerButton
+            onSendMessage={(msg) => onSend(msg)}
+            disabled={disabled || isStreaming}
+          />
           <textarea
             ref={ref}
             value={value}

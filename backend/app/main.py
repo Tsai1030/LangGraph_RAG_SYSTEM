@@ -33,7 +33,7 @@ from app.core.dependencies import get_current_user
 from app.database import get_db
 from app.graph.builder import build_graph
 from app.models.user import User
-from app.rag.form_lookup import get_form_path
+from app.rag.form_lookup import get_form_path, list_all_forms
 from app.services.conversation_service import get_conversation
 from app.services.form_fill_writer import get_filled_path
 
@@ -143,6 +143,12 @@ async def serve_image(image_path: str):
                     return FileResponse(candidate2)
 
     raise HTTPException(status_code=404, detail=f"Image not found: {image_path}")
+
+
+@app.get("/api/forms")
+async def list_forms(current_user: User = Depends(get_current_user)):
+    """列出所有靜態表單 metadata，供前端表單選單使用。"""
+    return list_all_forms()
 
 
 @app.get("/api/forms/{form_id}/download")
