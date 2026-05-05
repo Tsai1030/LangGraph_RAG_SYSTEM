@@ -25,6 +25,7 @@ interface ChatState {
   setCurrentMessages: (msgs: MessageOut[]) => void;
   appendMessage: (msg: MessageOut) => void;
   updateLastAssistantMessage: (content: string) => void;
+  truncateMessagesFrom: (messageId: string) => void;
 
   pendingMessage: string | null;
   setPendingMessage: (msg: string | null) => void;
@@ -64,6 +65,12 @@ export const useChatStore = create<ChatState>((set) => ({
         msgs[msgs.length - 1] = { ...last, content };
       }
       return { currentMessages: msgs };
+    }),
+  truncateMessagesFrom: (messageId) =>
+    set((s) => {
+      const idx = s.currentMessages.findIndex((m) => m.id === messageId);
+      if (idx === -1) return s;
+      return { currentMessages: s.currentMessages.slice(0, idx) };
     }),
 
   pendingMessage: null,

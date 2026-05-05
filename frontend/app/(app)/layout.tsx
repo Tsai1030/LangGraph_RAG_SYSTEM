@@ -59,7 +59,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <div className="md:hidden">
           {/* Blur backdrop */}
           <div
-            className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm"
+            className="fixed inset-0 z-40 bg-black/30"
             onClick={() => setMobileOpen(false)}
           />
           {/* Sidebar panel slides in from left */}

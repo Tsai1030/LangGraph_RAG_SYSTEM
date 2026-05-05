@@ -213,6 +213,54 @@ async def get_messages(
     return list(result.scalars().all())
 
 
+async def delete_messages_from(
+    db: AsyncSession,
+    conversation_id: str,
+    from_message_id: str,
+    *,
+    checkpointer=None,
+) -> None:
+    """從指定訊息（含）起，刪除其後所有訊息，並清掉 LangGraph thread state。
+
+    Why: retry 流程要把「要重答的那則 user 訊息」與其後所有訊息抹掉，再讓
+    /chat/stream 重跑一次。LangGraph checkpointer 內 messages 是用 add_messages
+    reducer，殘留會導致下一次 graph 執行時訊息列表被重複 append，所以一併清掉。
+    """
+    import logging
+    from sqlalchemy import delete as sql_delete
+
+    logger = logging.getLogger(__name__)
+
+    anchor_result = await db.execute(
+        select(Message).where(
+            Message.id == from_message_id,
+            Message.conversation_id == conversation_id,
+        )
+    )
+    anchor = anchor_result.scalar_one_or_none()
+    if not anchor:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Message not found in conversation",
+        )
+
+    await db.execute(
+        sql_delete(Message).where(
+            Message.conversation_id == conversation_id,
+            Message.created_at >= anchor.created_at,
+        )
+    )
+    await db.commit()
+
+    if checkpointer is not None:
+        try:
+            await checkpointer.adelete_thread(conversation_id)
+        except Exception:
+            logger.exception(
+                "[delete_messages_from] checkpointer 清理失敗 conv=%s", conversation_id
+            )
+
+
 # ── 摘要（Phase 3 compact 機制使用）──────────────────────────
 
 async def upsert_summary(

@@ -31,6 +31,7 @@ export default function ChatPage() {
     setStreamingFormFiles,
     setStreamingSources,
     clearStreaming,
+    truncateMessagesFrom,
   } = useChatStore();
 
   const [loading, setLoading] = useState(true);
@@ -242,6 +243,42 @@ export default function ChatPage() {
     abortControllersRef.current[conversationId]?.abort();
   };
 
+  const handleRetry = useCallback(
+    async (assistantMessageId: string) => {
+      if (!conversationId || isStreaming) return;
+
+      // 找到要重答的 assistant 訊息，往前抓最近一則 user 訊息當作 prompt
+      const currentMsgs = useChatStore.getState().currentMessages;
+      const idx = currentMsgs.findIndex((m) => m.id === assistantMessageId);
+      if (idx === -1) return;
+
+      let userIdx = -1;
+      for (let i = idx - 1; i >= 0; i--) {
+        if (currentMsgs[i].role === "user") {
+          userIdx = i;
+          break;
+        }
+      }
+      if (userIdx === -1) return;
+
+      const userMsg = currentMsgs[userIdx];
+
+      try {
+        // 後端：把 user 訊息與其後所有訊息一併刪掉，並清 LangGraph thread state
+        await api.delete(
+          `/conversations/${conversationId}/messages/${userMsg.id}/onward`
+        );
+      } catch {
+        return;
+      }
+
+      // 前端：把 store 內這段截掉，再走一次正常的 send 流程
+      truncateMessagesFrom(userMsg.id);
+      handleSend(userMsg.content);
+    },
+    [conversationId, isStreaming, truncateMessagesFrom, handleSend]
+  );
+
   return (
     <div className="relative flex flex-col h-full bg-background">
       <MessageList
@@ -254,6 +291,8 @@ export default function ChatPage() {
         loading={loading}
         onAtBottomChange={setIsAtBottom}
         scrollToBottomRef={scrollToBottomRef}
+        onRetry={handleRetry}
+        retryDisabled={isStreaming}
       />
 
       {showDots && (

@@ -23,6 +23,8 @@ interface Props {
   loading?: boolean;
   onAtBottomChange?: (atBottom: boolean) => void;
   scrollToBottomRef?: React.RefObject<(() => void) | null>;
+  onRetry?: (assistantMessageId: string) => void;
+  retryDisabled?: boolean;
 }
 
 function WelcomeScreen({ onQuery }: { onQuery: (q: string) => void }) {
@@ -70,7 +72,7 @@ function LoadingSkeleton() {
 export default function MessageList({
   messages, streamingMessage, streamingFormFiles,
   streamingSources, isFormLoading = false, onSuggestedQuery, loading = false,
-  onAtBottomChange, scrollToBottomRef,
+  onAtBottomChange, scrollToBottomRef, onRetry, retryDisabled = false,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [atBottom, setAtBottom] = useState(true);
@@ -131,7 +133,12 @@ export default function MessageList({
         ) : (
           <div className={cn("max-w-3xl mx-auto pt-8 flex flex-col gap-6", streamingMessage ? "pb-40" : "pb-8")}>
             {messages.map((msg) => (
-              <MessageBubble key={msg.id} message={msg} />
+              <MessageBubble
+                key={msg.id}
+                message={msg}
+                onRetry={msg.role === "assistant" ? onRetry : undefined}
+                retryDisabled={retryDisabled}
+              />
             ))}
             {streamingMessage && (
               <MessageBubble

@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Components } from "react-markdown";
-import { X, Copy } from "lucide-react";
+import { X, Copy, RotateCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { MessageOut, FormFile, Source } from "@/types";
 import SourcesPanel from "./SourcesPanel";
@@ -17,6 +17,88 @@ interface Props {
   isFormLoading?: boolean;
   streamingSources?: Source[];
   streamingFormFiles?: FormFile[];
+  onRetry?: (assistantMessageId: string) => void;
+  retryDisabled?: boolean;
+}
+
+function MessageActions({
+  content,
+  onRetry,
+  retryDisabled,
+}: {
+  content: string;
+  onRetry?: () => void;
+  retryDisabled?: boolean;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(async () => {
+    if (!content) return;
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // ignore
+    }
+  }, [content]);
+
+  return (
+    <div className="mt-2 flex items-center gap-1">
+      {/* Copy */}
+      <div className="group relative">
+        <button
+          onClick={handleCopy}
+          aria-label="Copy"
+          className={cn(
+            "size-7 rounded flex items-center justify-center",
+            "hover:bg-zinc-200/70 transition-colors"
+          )}
+        >
+          <Copy size={13} className="text-zinc-500" />
+        </button>
+        <span
+          className={cn(
+            "pointer-events-none absolute top-9 left-1/2 -translate-x-1/2 z-10",
+            "px-2 py-1 rounded-md whitespace-nowrap",
+            "text-[11px] bg-zinc-900 text-white shadow-md transition-opacity",
+            copied ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+          )}
+        >
+          {copied ? "Copied" : "Copy"}
+        </span>
+      </div>
+
+      {/* Retry */}
+      {onRetry && (
+        <div className="group relative">
+          <button
+            onClick={onRetry}
+            disabled={retryDisabled}
+            aria-label="Retry"
+            className={cn(
+              "size-7 rounded flex items-center justify-center transition-colors",
+              "hover:bg-zinc-200/70",
+              "disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+            )}
+          >
+            <RotateCw size={13} className="text-zinc-500" />
+          </button>
+          <span
+            className={cn(
+              "pointer-events-none absolute top-9 left-1/2 -translate-x-1/2 z-10",
+              "px-2 py-1 rounded-md whitespace-nowrap",
+              "text-[11px] bg-zinc-900 text-white shadow-md transition-opacity",
+              "opacity-0 group-hover:opacity-100",
+              retryDisabled && "group-hover:opacity-0"
+            )}
+          >
+            Retry
+          </span>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function Lightbox({ src, alt, onClose }: { src: string; alt: string; onClose: () => void }) {
@@ -168,6 +250,7 @@ function GeneratingTableText() {
 
 export default function MessageBubble({
   message, isStreaming = false, isFormLoading = false, streamingSources, streamingFormFiles,
+  onRetry, retryDisabled = false,
 }: Props) {
   const isUser = message.role === "user";
   const sources: Source[] = streamingSources ?? message.meta?.sources ?? [];
@@ -226,6 +309,15 @@ export default function MessageBubble({
             <div className="mt-3">
               <SourcesPanel sources={sources} />
             </div>
+          )}
+
+          {/* Copy / Retry — 串流中不顯示，避免使用者按到還沒完成的訊息 */}
+          {!isStreaming && message.content && (
+            <MessageActions
+              content={message.content}
+              onRetry={onRetry ? () => onRetry(message.id) : undefined}
+              retryDisabled={retryDisabled}
+            />
           )}
         </div>
       </div>

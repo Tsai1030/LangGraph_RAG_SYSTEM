@@ -17,6 +17,7 @@ from app.services.conversation_service import (
     get_conversation,
     rename_conversation,
     delete_conversation,
+    delete_messages_from,
     get_messages,
 )
 
@@ -91,5 +92,27 @@ async def delete_conversation_endpoint(
         db,
         conversation_id,
         current_user.id,
+        checkpointer=checkpointer,
+    )
+
+
+@router.delete(
+    "/{conversation_id}/messages/{message_id}/onward",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_messages_from_endpoint(
+    request: Request,
+    conversation_id: str,
+    message_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Retry 用：從指定訊息起截斷對話，並清 LangGraph thread state。"""
+    await get_conversation(db, conversation_id, current_user.id)
+    checkpointer = getattr(request.app.state, "checkpointer", None)
+    await delete_messages_from(
+        db,
+        conversation_id,
+        message_id,
         checkpointer=checkpointer,
     )
