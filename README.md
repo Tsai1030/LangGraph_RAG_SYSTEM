@@ -112,6 +112,7 @@ data/
 │   │   ├── cleanup_orphan_forms.py    # 清理已刪對話的殘留 docx 與 langgraph 線程
 │   │   └── 01_preprocess.py … 07     # 知識庫向量索引 pipeline
 │   └── tests/
+│       └── test_unified_intent.py     # 24 個測試（純函式 + mock LLM）
 ├── frontend/                          # Next.js 前端
 │   ├── app/(app)/                     # 主版型（sidebar + 內容）
 │   ├── components/
@@ -249,15 +250,17 @@ START
 
 ### 設計理念
 
-舊架構是 `retrieval_router (LLM)` + `intent_classifier (LLM 或 keyword)` 雙層判斷，兩組 keyword 互相誤觸發、判斷不一致。新架構合併為單一 node：
+舊架構是 `retrieval_router (LLM)` + `intent_classifier (LLM 或 keyword)` 雙層判斷，兩組 keyword 互相誤觸發、判斷不一致。中間版本合併為單一 node + 多條 keyword fast-path，但隨意圖種類增加，keyword 集合膨脹（曾達 51 條）並出現「短訊息誤判」問題（例：使用者深度討論中說『我要 X 的詳細說明』被字面騙成索取靜態檔）。
+
+**現行架構**：純 LLM 判斷 + post-normalization。除「冷啟動 → qa」零成本路徑外，全部交給 LLM，由 prompt 與 few-shot 教規則。
 
 | 層 | 由誰判斷 | 為什麼 |
 |---|---|---|
-| **Fast-paths**（程式碼） | 程式碼依旗標決定 | 高信心訊號（明確「填」/「下載」動詞 + 候選表）用 code 鎖死，避免 mini 模型搖擺 |
-| **LLM**（fallback） | grader_model + structured output | 模糊 / 上下文相關訊號靠語意理解 |
-| **Post-normalization**（程式碼） | 程式碼校驗 | 防 LLM 越界輸出（不存在的 form_id、缺 retrieval_topic 等） |
+| **冷啟動 fast-path**（程式碼） | 旗標檢查 | 首輪 + 無候選 + 無前輪表單 + 無 session → 必為 qa，不打 LLM 省一次 API |
+| **LLM 主判斷** | grader_model（gpt-5.4） + structured output | 看完整對話脈絡，不被單一動詞字面騙 |
+| **Post-normalization**（程式碼） | 規則校驗 | 防 LLM 越界輸出（不存在的 form_id、缺 retrieval_topic、active session target 沿用等） |
 
-大部分對話走 fast-path **不打 LLM**，省 latency 與 token。
+設計取捨：每輪多一次 LLM call（≈300-800ms），換取**上下文敏感度**與**零 keyword 維護負擔**。在 RAG 系統裡這個延遲與 retriever / responder 比起來微不足道。
 
 ### 5 個 Intent
 
@@ -269,22 +272,30 @@ START
 | `dynamic_form_generate` | 沒對應靜態表，RAG 後即時生成結構化表單 |
 | `form_continuation` | 延續上一輪生成過的動態表單（再來幾組） |
 
-### 5 個 Fast-paths（依序執行）
+### 流程
 
 ```
 input 準備
   ├─ candidates = _resolve_candidates(query, recent_messages)   # query 命不中時 fallback 對話歷史
-  ├─ has_fill_phrase / has_download_phrase / has_request_verb / has_qa_marker / has_edit_phrase
-  └─ active_fill / completed_session
+  ├─ has_prior_ai / prev_form_data / fill_session
+  └─ recent = 最近 3 輪訊息（給 LLM 看）
 
-Fast-path 1: 首輪 + 無候選 + 無前一輪表單 + 無 active session   → qa（不打 LLM）
-Fast-path 2: candidates ∧ has_fill_phrase ∧ ¬has_download       → static_form_fill (target=候選 0)
-Fast-path 2.5: candidates ∧ has_request_verb ∧ ¬fill ∧ ¬download ∧ ¬qa_marker
-                                                                → static_form_download
-Fast-path 3: active_fill ∧ has_fill_phrase ∧ ¬has_download      → static_form_fill (沿用 session id)
-Fast-path 4: completed_session ∧ has_edit_phrase ∧ ¬has_download → static_form_fill (重啟編輯)
+冷啟動 fast-path
+  if not has_prior_ai and not candidates and not prev_form_data
+     and fill_session.status not in ("collecting", "completed"):
+     → return qa, need_retrieval=true（不打 LLM）
 
-以上皆未命中 → LLM call (with_structured_output(IntentDecision)) + 後處理校驗
+否則 → _llm_classify (with_structured_output(IntentDecision))
+        ├─ prompt 含對話歷史 / 候選表 / prev_form / fill_session 詳情
+        ├─ few-shot 11 個範例覆蓋邊界 case（含「我要 X 的詳細說明 = qa」這類舊 fast-path 誤判）
+        └─ 輸出 (intent, target_form_id, retrieval_topic, need_retrieval, reason)
+        ↓
+      _normalize_decision 校驗
+        ├─ static_form_* + target 不在候選 ∪ session id  → 退回 qa
+        ├─ static_form_* 但 target=null 且有 session → 沿用 session.target
+        └─ form_continuation 缺 prev_form_data 或 retrieval_topic → 改 dynamic_form_generate
+        ↓
+      _build_state_update 組 graph state 變更
 ```
 
 ### IntentDecision schema
@@ -296,8 +307,12 @@ class IntentDecision(BaseModel):
     target_form_id: Optional[str]      # static_form_* 必填
     retrieval_topic: Optional[str]     # form_continuation 必填
     need_retrieval: bool
-    reason: str
+    reason: str                         # 30 字內判斷依據（LangSmith / log 可追）
 ```
+
+`reason` 欄位是核心 debug 機制：每次推理都自帶可解釋說明，例如：
+- `「明確詢問內容解說，非續填表」` — 判 qa 的依據
+- `「已完成表單的編輯指令，沿用session」` — 判 static_form_fill 的依據
 
 ### 候選召回（_resolve_candidates）
 
@@ -305,6 +320,21 @@ class IntentDecision(BaseModel):
 - 命不中時 fallback 拼接最近 3 輪對話文字再比對一次
 
 → 解決使用者第二輪只說「我想要填入資訊」（無表名）時，能繼承上一輪提到的表單。
+
+### 程式碼結構
+
+```
+unified_intent.py（≈210 行）
+├── Schema:        IntentDecision
+├── System prompt: 5 intent 定義 + 決策原則 + 11 個 few-shot
+├── Pure helpers:  _resolve_candidates / _resolve_form_meta
+│                  _build_history_text / _build_user_prompt
+│                  _normalize_decision / _build_state_update
+├── LLM wrapper:   _llm_classify
+└── Graph node:    unified_intent (主流程約 25 行)
+```
+
+純函式分離讓單元測試容易（24 個測試，全 mock LLM，不需 API key 即可在 CI 跑）。
 
 ### CRAG 閉環
 

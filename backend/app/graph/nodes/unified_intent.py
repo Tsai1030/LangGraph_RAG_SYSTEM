@@ -1,30 +1,31 @@
 """
 unified_intent.py — 統一意圖分類節點
 
-一次 LLM call 完成所有路由決策，取代原本 router + intent_classifier 的雙層
-keyword + LLM 判斷，避免兩組關鍵字互相誤觸發。
+設計：純 LLM 判斷 + post-normalization。除了「冷啟動 → qa」這個零成本路徑外，
+所有意圖分類都交給 LLM，由 prompt 與 few-shot 把規則教給模型。
 
-輸出（IntentDecision）：
-- intent: qa | static_form_download | dynamic_form_generate | form_continuation
-- target_form_id: 命中的靜態表 form_id（intent=static_form_download 時必填）
-- retrieval_topic: 延續主題詞（intent=form_continuation 時必填）
-- need_retrieval: 是否需要 RAG 檢索
-- reason: 一句話判斷依據
+為什麼不用 keyword fast-path：
+- 短訊息看字面易誤判（例「我要規範的詳細說明」含「我要」會被誤判成索取靜態檔）
+- keyword 集合會無限膨脹、難維護、難測試組合
+- gpt-5.4 級的模型對五分類已足夠穩定
 
-設計重點：
-- lookup_forms 只做「候選召回」，由 LLM 看 query + 候選清單 + 對話歷史決策
-- 首輪（無 AI 歷史）且無候選靜態表 → 直接 qa + 需檢索，不呼叫 LLM
+回傳的 state 更新：
+- intent: qa | static_form_download | static_form_fill | dynamic_form_generate | form_continuation
+- need_retrieval: bool
+- matched_forms: list[dict]   （static_form_*：命中那份；qa：候選表用於下載提示；其他：空）
+- form_explicit: bool          （static_form_* 為 True，supress 一般 RAG prompt 改用短回應）
+- is_form_continuation: bool
+- retrieval_query: Optional[str]   （form_continuation 時帶推斷主題詞）
 """
 
 from __future__ import annotations
 
+import logging
 from typing import Literal, Optional
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
-
-import logging
 
 from app.config import settings
 from app.graph.state import GraphState
@@ -33,33 +34,12 @@ from app.rag.form_lookup import get_form_meta, lookup_forms
 logger = logging.getLogger(__name__)
 
 _MAX_HISTORY_TURNS = 3
+_HISTORY_MSG_CHARS = 400  # 單則訊息截斷長度（避免 prompt 爆量）
 
-# 明確的「要填寫」動詞片語：候選非空時看到任一片語 → 直接走 static_form_fill 快速路徑
-# 這不是 keyword routing 的回頭路；候選召回仍依 form_lookup，只是把「填」這個明確動詞的判斷
-# 從 LLM 拿回來，避免 mini 模型在 download/fill 之間搖擺。
-_FILL_TRIGGER_PHRASES = (
-    "幫我填", "協助填", "請填", "要填", "想填", "來填", "需要填", "代填",
-    "自動填", "幫忙填", "替我填",
-    "填寫", "填入", "填好", "把資料填", "把內容填", "都填", "全填", "全部填",
-)
 
-# 明確「下載原檔」訊號（協助 fast-path 區分 download vs fill）
-_DOWNLOAD_TRIGGER_PHRASES = (
-    "下載", "給我空白", "原始檔", "空白檔", "範本", "檔案下載",
-)
-
-# 「編輯已完成填寫」訊號：填完表後想修改某些欄位
-_EDIT_TRIGGER_PHRASES = (
-    "改成", "改為", "改一下", "改這", "改那", "更新",
-    "替換", "重新填", "再填", "修改", "編輯", "改掉",
-)
-
-# 索取動詞（「我要 X」「給我 X」這類無明確下載動詞但仍是要原檔的訊號）
-_REQUEST_VERBS = ("我要", "給我", "請給", "我需要", "麻煩給")
-
-# qa 標記（含這些字眼通常是知識問答而非索取）
-_QA_MARKERS = ("什麼", "為什麼", "為何", "如何", "怎麼", "?", "？", "嗎?", "嗎？")
-
+# ──────────────────────────────────────────────────────────────────
+# Schema — LLM 結構化輸出
+# ──────────────────────────────────────────────────────────────────
 
 class IntentDecision(BaseModel):
     intent: Literal[
@@ -71,86 +51,105 @@ class IntentDecision(BaseModel):
     ] = Field(description="使用者意圖分類（五選一）")
     target_form_id: Optional[str] = Field(
         default=None,
-        description="若 intent=static_form_download 或 static_form_fill，填入候選 form_id；其他情況為 null",
+        description="若 intent=static_form_*，填入候選 form_id；其他情況為 null",
     )
     retrieval_topic: Optional[str] = Field(
         default=None,
         description="若 intent=form_continuation，填入推斷的表單主題詞（10字內）；其他情況為 null",
     )
     need_retrieval: bool = Field(
-        description="是否需要 RAG 檢索（static_form_* = false；其餘依規則決定）"
+        description="是否需要 RAG 檢索（static_form_* 為 false；其餘依規則）"
     )
-    reason: str = Field(description="一句話判斷依據（20字內）")
+    reason: str = Field(description="一句話判斷依據（30字內）")
 
 
 _SYSTEM_PROMPT = """\
-你是對話分析助理。為使用者的當前訊息決定處理方式，並以 JSON 結構化回傳。
+你是對話分析助理。依使用者「當前訊息」與「對話脈絡」決定處理方式，並以 JSON 結構化輸出。
 
 【intent 五選一】
-1. static_form_download
-   - 使用者要索取「候選靜態表清單」中某一份檔案的**原始空白檔**下載
-   - 訊號：「給我這份」「下載這份檢核表」「我要這份表單」「給我空白檔」
-   - target_form_id 必填，須為候選清單中存在的 id
-2. static_form_fill
-   - 使用者要把資料**填寫進**既有靜態表，agent 會逐欄收集後寫入並回傳填好的檔
-   - 強訊號（任一即可）：「填」「填寫」「填入」「填好」「協助填」「幫我填」「我要填」「想填」「需要填」「來填」「代填」「把資料填」「全部填」「自動填」「隨便填」
-   - 或：當前已有填表 session 進行中（補充資訊會標示），使用者訊息是補欄位值或結束指示
-   - target_form_id 必填，須為候選清單中存在的 id（或現有 session 的 id）
-3. dynamic_form_generate
-   - 使用者要產生**全新**結構化表單（清單／檢核表／報表）
-   - 訊號：「幫我做一份…表」「整理成表格」「列一個…清單」「產出檢核表」
-   - 與既有靜態表主題不一致、或候選清單為空
-4. form_continuation
-   - 延續「上一輪曾生成過的動態表單」（補資料：「再來五組」「多出幾題」「繼續做」）
-   - 必要條件：補充資訊標示「上一輪有生成表單」
-   - retrieval_topic 必填（從歷史推斷主題，10字內）
-5. qa
-   - 詢問知識、規範、流程、定義、步驟說明；無表單意圖
+1. static_form_download — 索取既有靜態表的**空白原檔**下載
+2. static_form_fill     — 把資料**填寫進**既有靜態表（agent 寫好回傳）
+3. dynamic_form_generate — 產生**全新**結構化表單（沒有對應靜態表，或要客製版）
+4. form_continuation     — 延續「上一輪生成過的動態表單」（再來幾組／多出幾題）
+5. qa                    — 詢問知識、規範、流程、解說；無表單意圖
 
-【need_retrieval】
-- static_form_download / static_form_fill → false
-- dynamic_form_generate / form_continuation → true
-- qa：若是改寫前一輪回答、追問前一輪細節、致謝確認 → false；其餘 → true
+【決策原則（依序判斷）】
 
-【判斷原則】
-- 候選靜態表清單為空且無進行中填表 session 時，禁止輸出 static_form_*
-- download vs fill 的關鍵差異：download = 要空白檔，fill = 要把資料填進去
-- 進行中的填表 session：使用者若是給欄位值或要結束填表 → static_form_fill；改問完全不相關的知識 → qa
-- 訊息有歧義時：偏向 qa；need_retrieval 偏向 true（保守）
-- target_form_id 須在候選 id 內或為現有 session id；其他 intent 一律填 null
-- reason 用 20 字內中文說明判斷依據
+1. 看訊息**整體語意**，不要被單一動詞字面騙：
+   - 「我要這份規範的詳細說明」 → qa（要解說，不是要檔案）
+   - 「我要動員開工檢核表」     → static_form_download（要檔案）
+   - 「我要填動員開工檢核表」   → static_form_fill（要填）
+
+2. 利用「對話歷史」理解上下文：
+   - 上輪在問問題、本輪「我要再深入點」 → 仍是 qa（深度討論延續）
+   - 上輪是表單下載、本輪「再給我一次」 → static_form_download
+   - 上輪是填表中、本輪「就這樣」「OK」「改成 abc」 → static_form_fill（沿用 session）
+
+3. 候選靜態表清單為空時，**禁止輸出 static_form_***（除非有 active session）。
+
+4. form_continuation **必要條件**：補充資訊明確標示「上一輪曾生成過動態表單」，
+   且訊息語意是「再多來幾筆」之類延續。retrieval_topic 必填。
+
+5. 模糊難判時 → 偏向 qa（保守）；need_retrieval 偏向 true（保守）。
+
+【static_form_fill 的兩種觸發】
+A. **新填**：候選非空 + 訊息語意明確要填寫該表（含「填」「填寫」「協助填」「幫我填」「我要填」）
+B. **續填／編輯**：active 或 completed session 進行中，訊息為：
+   - 補欄位值（如「工程名稱叫和平大樓」）
+   - 結束指示（「就這樣」「OK」「改完了」）
+   - 編輯指令（「把備註改成 abc」「全部填 test」）
+   - 此時 target_form_id 沿用 session 的 id
+
+【target_form_id 規則】
+- static_form_* 必填，且必須是「候選清單中的 id」或「現有 session 的 id」
+- 其他 intent 一律填 null
 
 【few-shot 範例】
-[A] 訊息：「我要填動員開工檢核表」候選：[010101 動員開工作業檢核表]
-  → static_form_fill, target_form_id=010101, need_retrieval=false  ★「要填」+ 候選 → fill
 
-[B] 訊息：「下載動員開工檢核表」候選：[010101]
-  → static_form_download, target_form_id=010101, need_retrieval=false
+[A] 「我要填動員開工檢核表」 候選=[010101 動員開工作業檢核表]
+    → static_form_fill / target=010101 / 「明確要填靜態表」
 
-[B2] 訊息：「我要動員檢核表」候選：[010101]
-  → static_form_download, target_form_id=010101, need_retrieval=false
-  ★「我要 + 候選表名」+ 無 qa 標記（?/什麼/如何） → 視為要原檔，**不可退到 qa**
+[B] 「下載動員開工檢核表」 候選=[010101]
+    → static_form_download / target=010101 / 「明確下載」
 
-[C] 訊息：「動員開工是什麼？」候選：[010101]
-  → qa, target_form_id=null（含 ?/什麼 → 是知識問答，候選在回答末尾以下載連結輔助）
+[C] 「我要動員檢核表」 候選=[010101]，訊息**無 ?/什麼/如何/解說等 qa 訊號**
+    → static_form_download / target=010101 / 「我要 + 表名 = 索取檔案」
 
-[D] 訊息：「好我要填寫」候選：[]，session=010101 (collecting)
-  → static_form_fill, target_form_id=010101  ★沿用 session id
+[D] 「動員開工是什麼？」 候選=[010101]
+    → qa / target=null / need_retrieval=true / 「知識問答，候選會在回答末尾以下載連結輔助」
 
-[E] 訊息：「全部都幫我填上 test 給我」候選：[]，session=010101 (collecting)
-  → static_form_fill, target_form_id=010101  ★「自動填假資料」也是 fill 訊號
+[E] 「我要這份規範的詳細說明」 候選=[010101 從歷史推斷]，先前在 qa 串
+    → qa / target=null / 「使用者要解說，不是要檔案 — 不要被「我要」字面騙」
 
-[F] 訊息：「鋼筋規範是什麼？」候選：[]，session=010101 (collecting)
-  → qa  ★明確切換無關主題
+[F] 「好我要填寫」 候選=[]，session=010101 status=collecting
+    → static_form_fill / target=010101 / 「沿用 session id」
 
-[G] 訊息：「幫我做一份新的開工檢核表」候選：[010101]
-  → dynamic_form_generate（使用者要新版而非既有靜態表）"""
+[G] 「全部都幫我填上 test 給我」 候選=[]，session=010101 status=collecting
+    → static_form_fill / target=010101 / 「自動填假資料指令」
 
+[H] 「鋼筋規範是什麼」 候選=[]，session=010101 status=collecting
+    → qa / 「明確切換無關主題」
+
+[I] 「把備註的 test 改成 123」 候選=[]，session=010101 status=completed
+    → static_form_fill / target=010101 / 「重啟編輯」
+
+[J] 「幫我做一份新的開工檢核表」 候選=[010101]
+    → dynamic_form_generate / 「使用者要新版本而非靜態表」
+
+[K] 「再來五組」 候選=[]，prev_form_data=新人訓練是非題
+    → form_continuation / retrieval_topic=新人訓練是非題
+
+reason 用 30 字內中文說明依據。"""
+
+
+# ──────────────────────────────────────────────────────────────────
+# Pure helpers — 純函式，無副作用，易單元測試
+# ──────────────────────────────────────────────────────────────────
 
 def _resolve_candidates(query: str, recent_messages: list) -> list[dict]:
-    """
-    候選靜態表 = 先看本輪 query 是否命中；命不中再 fallback 看最近對話歷史。
-    解決使用者第二輪只說「我想要填入資訊」（無表名）時，能繼承上一輪提到的表單。
+    """候選靜態表 = 先用本輪 query 比對；命不中時 fallback 拼接最近對話再比對一次。
+
+    解決使用者第二輪只說「我想要填入資訊」（無表名）時，能延續上一輪提到的表單。
     """
     direct = lookup_forms(query)
     if direct:
@@ -158,131 +157,44 @@ def _resolve_candidates(query: str, recent_messages: list) -> list[dict]:
     if not recent_messages:
         return []
     history_text = " ".join(
-        m.content[:400]
+        m.content[:_HISTORY_MSG_CHARS]
         for m in recent_messages
         if hasattr(m, "content") and isinstance(m.content, str)
     )
     return lookup_forms(history_text) if history_text else []
 
 
-async def unified_intent(state: GraphState) -> dict:
-    """
-    一次 LLM call 完成意圖分類 + 路由決策。
+def _resolve_form_meta(form_id: str, candidates: list[dict]) -> dict:
+    """取出 form_id 的 metadata。優先用本輪 candidates，再 fallback 到 registry，最後給 placeholder。"""
+    for c in candidates:
+        if c["form_id"] == form_id:
+            return c
+    meta = get_form_meta(form_id)
+    return meta or {"form_id": form_id, "display_name": form_id, "download_url": ""}
 
-    回傳的 state 更新：
-    - intent: 'qa' | 'static_form_download' | 'static_form_fill' | 'dynamic_form_generate' | 'form_continuation'
-    - need_retrieval: bool
-    - matched_forms: list[dict]
-    - form_explicit: bool         （intent=static_form_* 時 True）
-    - is_form_continuation: bool
-    - retrieval_query: Optional[str]  （form_continuation 時設為 retrieval_topic）
-    """
-    query = state["query"]
 
-    messages = state.get("messages", [])
-    prior = [m for m in messages[:-1] if isinstance(m, (HumanMessage, AIMessage))]
-    recent = prior[-(_MAX_HISTORY_TURNS * 2):]
-    has_prior_ai = any(isinstance(m, AIMessage) for m in recent)
-    prev_form_data = state.get("prev_form_data")
-    fill_session = state.get("form_fill_session") or {}
-    active_fill = fill_session.get("status") == "collecting"
+def _build_history_text(recent_messages: list) -> str:
+    """格式化對話歷史給 LLM。每則訊息截斷至 _HISTORY_MSG_CHARS 字以避免 prompt 爆量。"""
+    lines: list[str] = []
+    for msg in recent_messages:
+        if not (hasattr(msg, "content") and isinstance(msg.content, str)):
+            continue
+        text = msg.content[:_HISTORY_MSG_CHARS]
+        if isinstance(msg, HumanMessage):
+            lines.append(f"使用者：{text}")
+        elif isinstance(msg, AIMessage):
+            lines.append(f"AI 助理：{text}")
+    return "\n".join(lines) if lines else "（無）"
 
-    # 候選靜態表：本輪命中 → 命不中時 fallback 對話歷史
-    candidates = _resolve_candidates(query, recent)
 
-    # 快速路徑 1：首輪、無候選表、無前輪表單、無進行中填表 → 直接 qa
-    if not has_prior_ai and not candidates and not prev_form_data and not active_fill:
-        return {
-            "intent": "qa",
-            "need_retrieval": True,
-            "matched_forms": [],
-            "form_explicit": False,
-            "is_form_continuation": False,
-        }
-
-    has_fill_phrase = any(p in query for p in _FILL_TRIGGER_PHRASES)
-    has_download_phrase = any(p in query for p in _DOWNLOAD_TRIGGER_PHRASES)
-    has_edit_phrase = any(p in query for p in _EDIT_TRIGGER_PHRASES)
-    has_request_verb = any(v in query for v in _REQUEST_VERBS)
-    has_qa_marker = any(m in query for m in _QA_MARKERS)
-    completed_session = fill_session.get("status") == "completed"
-
-    # 快速路徑 2：候選非空 + 明確「填」動詞 + 無「下載」動詞 → 直接 static_form_fill
-    # 解決 mini 模型在「我要填X」這類訊息搖擺於 qa/download/fill 的問題
-    if candidates and has_fill_phrase and not has_download_phrase:
-        target = candidates[0]
-        logger.info(
-            "[unified_intent] fast-path 2 → static_form_fill, target=%s (candidates=%s)",
-            target["form_id"], [c["form_id"] for c in candidates],
-        )
-        return {
-            "intent": "static_form_fill",
-            "need_retrieval": False,
-            "matched_forms": [target],
-            "form_explicit": True,
-            "is_form_continuation": False,
-        }
-
-    # 快速路徑 2.5：候選非空 + 索取動詞（我要/給我）+ 無 fill/download/qa 標記 → static_form_download
-    # 處理「我要動員檢核表」這種沒有「填」「下載」明示動詞、也不是知識問答的索取訊息
-    if (
-        candidates
-        and has_request_verb
-        and not has_fill_phrase
-        and not has_download_phrase
-        and not has_qa_marker
-    ):
-        target = candidates[0]
-        logger.info(
-            "[unified_intent] fast-path 2.5 → static_form_download (request verb), target=%s",
-            target["form_id"],
-        )
-        return {
-            "intent": "static_form_download",
-            "need_retrieval": False,
-            "matched_forms": [target],
-            "form_explicit": True,
-            "is_form_continuation": False,
-        }
-
-    # 快速路徑 3：active fill session + 明確「填」動詞 → 沿用 session 續填
-    if active_fill and has_fill_phrase and not has_download_phrase:
-        target_id = fill_session.get("target_form_id")
-        meta = get_form_meta(target_id) if target_id else None
-        if meta:
-            logger.info("[unified_intent] fast-path 3 → resume active session %s", target_id)
-            return {
-                "intent": "static_form_fill",
-                "need_retrieval": False,
-                "matched_forms": [meta],
-                "form_explicit": True,
-                "is_form_continuation": False,
-            }
-
-    # 快速路徑 4：completed session + 編輯動詞 → 重啟同一份表的編輯（保留已收集值）
-    # 處理「填完表後想改某幾欄」的常見訴求
-    if completed_session and has_edit_phrase and not has_download_phrase:
-        target_id = fill_session.get("target_form_id")
-        meta = get_form_meta(target_id) if target_id else None
-        if meta:
-            logger.info("[unified_intent] fast-path 4 → resume completed session %s for edit", target_id)
-            return {
-                "intent": "static_form_fill",
-                "need_retrieval": False,
-                "matched_forms": [meta],
-                "form_explicit": True,
-                "is_form_continuation": False,
-            }
-
-    # ── 組裝 LLM 輸入 ────────────────────────────────────────
-    history_lines: list[str] = []
-    for msg in recent:
-        if isinstance(msg, HumanMessage) and isinstance(msg.content, str):
-            history_lines.append(f"使用者：{msg.content}")
-        elif isinstance(msg, AIMessage) and isinstance(msg.content, str):
-            history_lines.append(f"AI 助理：{msg.content[:400]}")
-    history_text = "\n".join(history_lines) if history_lines else "（無）"
-
+def _build_user_prompt(
+    query: str,
+    candidates: list[dict],
+    prev_form_data: Optional[dict],
+    fill_session: dict,
+    history_text: str,
+) -> str:
+    """組裝給 LLM 的 user prompt。"""
     if candidates:
         cand_lines = "\n".join(
             f"- form_id={c['form_id']}  display_name={c['display_name']}"
@@ -297,51 +209,68 @@ async def unified_intent(state: GraphState) -> dict:
         else "前一輪未生成動態表單"
     )
 
-    fill_hint = (
-        f"進行中填表 session：target_form_id={fill_session.get('target_form_id')}，"
-        f"已收集 {len(fill_session.get('collected', {}))} 欄位"
-        if active_fill
-        else "無進行中填表 session"
+    status = fill_session.get("status")
+    target = fill_session.get("target_form_id")
+    if status == "collecting":
+        fill_hint = (
+            f"進行中填表 session：target_form_id={target}，"
+            f"已收集 {len(fill_session.get('collected', {}))} 欄位"
+        )
+    elif status == "completed":
+        fill_hint = f"上一份填表 session 已完成：target_form_id={target}（可重啟編輯）"
+    else:
+        fill_hint = "無進行中／可重啟的填表 session"
+
+    return (
+        f"對話歷史：\n{history_text}\n\n"
+        f"當前訊息：{query}\n\n"
+        f"候選靜態表：\n{cand_lines}\n\n"
+        f"補充資訊：{prev_form_hint}\n{fill_hint}"
     )
 
-    llm = ChatOpenAI(
-        model=settings.grader_model,
-        api_key=settings.openai_api_key,
-        temperature=0,
-    ).with_structured_output(IntentDecision)
 
-    decision: IntentDecision = await llm.ainvoke([
-        SystemMessage(content=_SYSTEM_PROMPT),
-        HumanMessage(content=(
-            f"對話歷史：\n{history_text}\n\n"
-            f"當前訊息：{query}\n\n"
-            f"候選靜態表：\n{cand_lines}\n\n"
-            f"補充資訊：{prev_form_hint}\n{fill_hint}"
-        )),
-    ])
+def _normalize_decision(
+    decision: IntentDecision,
+    candidates: list[dict],
+    fill_session: dict,
+    prev_form_data: Optional[dict],
+) -> tuple[str, Optional[str]]:
+    """LLM 越界輸出防護。回傳 (intent, target_form_id)。
 
-    # ── 規範化決策（防 LLM 越界輸出）────────────────────────
+    規則：
+    - static_form_* 但 target_form_id 不在候選 ∪ session id → 退回 qa
+    - static_form_* 但 target 為 null 且有 active/completed session → 沿用 session id
+    - form_continuation 但缺 prev_form_data 或 retrieval_topic → 改 dynamic_form_generate
+    """
     intent = decision.intent
-    candidate_ids = {c["form_id"] for c in candidates}
     target_id = decision.target_form_id
 
-    # 進行中填表 session 的目標 id 也視為合法
-    if active_fill:
-        candidate_ids.add(fill_session["target_form_id"])
+    valid_ids = {c["form_id"] for c in candidates}
+    session_target = fill_session.get("target_form_id")
+    if session_target and fill_session.get("status") in ("collecting", "completed"):
+        valid_ids.add(session_target)
 
     if intent in ("static_form_download", "static_form_fill"):
-        # fill 進行中時若 LLM 未填 target_id，預設沿用 session 中的
-        if not target_id and active_fill:
-            target_id = fill_session["target_form_id"]
-        if not target_id or target_id not in candidate_ids:
+        if not target_id and session_target:
+            target_id = session_target
+        if not target_id or target_id not in valid_ids:
             intent = "qa"
+            target_id = None
 
-    if intent == "form_continuation" and (
-        not prev_form_data or not decision.retrieval_topic
-    ):
-        intent = "dynamic_form_generate"
+    if intent == "form_continuation":
+        if not prev_form_data or not decision.retrieval_topic:
+            intent = "dynamic_form_generate"
 
-    # ── 對應到 graph 後續節點需要的欄位 ──────────────────────
+    return intent, target_id
+
+
+def _build_state_update(
+    intent: str,
+    target_id: Optional[str],
+    decision: IntentDecision,
+    candidates: list[dict],
+) -> dict:
+    """根據規範化後的 (intent, target_id) 產生要回給 graph 的 state 變更 dict。"""
     result: dict = {
         "intent": intent,
         "need_retrieval": decision.need_retrieval,
@@ -350,24 +279,16 @@ async def unified_intent(state: GraphState) -> dict:
         "matched_forms": [],
     }
 
-    def _form_meta(form_id: str) -> dict:
-        for c in candidates:
-            if c["form_id"] == form_id:
-                return c
-        # session 中的表單可能不在本輪 candidates 內 → 從 registry 重新查
-        meta = get_form_meta(form_id)
-        return meta or {"form_id": form_id, "display_name": form_id, "download_url": ""}
-
     if intent == "static_form_download":
-        result["matched_forms"] = [_form_meta(target_id)]
+        result["matched_forms"] = [_resolve_form_meta(target_id, candidates)]
         result["form_explicit"] = True
         result["need_retrieval"] = False
     elif intent == "static_form_fill":
-        result["matched_forms"] = [_form_meta(target_id)]
+        result["matched_forms"] = [_resolve_form_meta(target_id, candidates)]
         result["form_explicit"] = True
         result["need_retrieval"] = False
     elif intent == "qa":
-        # qa 仍可在回應末端提示候選下載（保留既有 UX）
+        # qa 仍把候選表帶下去，讓 responder 在回答末尾附下載連結
         result["matched_forms"] = candidates
     elif intent == "dynamic_form_generate":
         result["need_retrieval"] = True
@@ -377,3 +298,81 @@ async def unified_intent(state: GraphState) -> dict:
         result["retrieval_query"] = decision.retrieval_topic
 
     return result
+
+
+# ──────────────────────────────────────────────────────────────────
+# LLM wrapper
+# ──────────────────────────────────────────────────────────────────
+
+async def _llm_classify(
+    query: str,
+    candidates: list[dict],
+    prev_form_data: Optional[dict],
+    fill_session: dict,
+    recent_messages: list,
+) -> IntentDecision:
+    """單次 LLM call 取得意圖判斷。"""
+    history_text = _build_history_text(recent_messages)
+    user_prompt = _build_user_prompt(
+        query, candidates, prev_form_data, fill_session, history_text,
+    )
+
+    llm = ChatOpenAI(
+        model=settings.grader_model,
+        api_key=settings.openai_api_key,
+        temperature=0,
+    ).with_structured_output(IntentDecision)
+
+    return await llm.ainvoke([
+        SystemMessage(content=_SYSTEM_PROMPT),
+        HumanMessage(content=user_prompt),
+    ])
+
+
+# ──────────────────────────────────────────────────────────────────
+# Graph node 主入口
+# ──────────────────────────────────────────────────────────────────
+
+async def unified_intent(state: GraphState) -> dict:
+    """主流程：冷啟動快速回傳 → LLM 分類 → 規範化 → 組 state 變更。"""
+    query = state["query"]
+
+    messages = state.get("messages", [])
+    prior = [m for m in messages[:-1] if isinstance(m, (HumanMessage, AIMessage))]
+    recent = prior[-(_MAX_HISTORY_TURNS * 2):]
+    has_prior_ai = any(isinstance(m, AIMessage) for m in recent)
+    prev_form_data = state.get("prev_form_data")
+    fill_session = state.get("form_fill_session") or {}
+
+    candidates = _resolve_candidates(query, recent)
+
+    # 冷啟動 fast-path：首輪 + 完全無 form 上下文 → 必為 qa，不打 LLM
+    if (
+        not has_prior_ai
+        and not candidates
+        and not prev_form_data
+        and fill_session.get("status") not in ("collecting", "completed")
+    ):
+        logger.info("[unified_intent] cold-start → qa (no LLM call)")
+        return {
+            "intent": "qa",
+            "need_retrieval": True,
+            "matched_forms": [],
+            "form_explicit": False,
+            "is_form_continuation": False,
+        }
+
+    # LLM 分類
+    decision = await _llm_classify(query, candidates, prev_form_data, fill_session, recent)
+
+    # 規範化（防 LLM 越界）
+    intent, target_id = _normalize_decision(
+        decision, candidates, fill_session, prev_form_data,
+    )
+
+    logger.info(
+        "[unified_intent] intent=%s target=%s need_retrieval=%s reason=%r",
+        intent, target_id, decision.need_retrieval, decision.reason,
+    )
+
+    return _build_state_update(intent, target_id, decision, candidates)
