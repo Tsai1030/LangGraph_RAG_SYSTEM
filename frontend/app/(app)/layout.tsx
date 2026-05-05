@@ -4,11 +4,14 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { tryRestoreSession } from "@/lib/auth";
 import { useAuthStore } from "@/store/authStore";
+import api from "@/lib/api";
+import type { User } from "@/types";
 import Sidebar from "@/components/layout/Sidebar";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const accessToken = useAuthStore((s) => s.accessToken);
+  const setUser = useAuthStore((s) => s.setUser);
   const [ready, setReady] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -23,6 +26,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         }
         // 從 cookie 還原 session（頁面重整或首次進入）→ 固定從歡迎頁開始
         router.replace("/new");
+      }
+      try {
+        const { data } = await api.get<User>("/auth/me");
+        setUser(data);
+      } catch {
+        // /auth/me 失敗不阻塞 UI；profile section 會 fallback 到佔位
       }
       setReady(true);
     };

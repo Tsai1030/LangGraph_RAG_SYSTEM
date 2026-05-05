@@ -3,13 +3,15 @@
 import { useEffect, useState, useRef } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Image from "next/image";
-import { Plus, Trash2, LogOut, Pencil, X, PanelLeft, MessageSquare, MoreHorizontal } from "lucide-react";
+import { Plus, Trash2, LogOut, Pencil, X, PanelLeft, MessageSquare, MoreHorizontal, HelpCircle, ChevronUp, ChevronDown } from "lucide-react";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import api from "@/lib/api";
 import { logout } from "@/lib/auth";
 import { useChatStore } from "@/store/chatStore";
+import { useAuthStore } from "@/store/authStore";
+import HelpPanel from "./HelpPanel";
 import type { ConversationOut } from "@/types";
 
 interface Props {
@@ -38,14 +40,20 @@ export default function Sidebar({ collapsed, onToggle, onMobileClose }: Props) {
   const { conversations, setConversations, addConversation, removeConversation, updateConversationTitle } =
     useChatStore();
 
+  const user = useAuthStore((s) => s.user);
+
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const editRef = useRef<HTMLInputElement>(null);
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [userMenuPos, setUserMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
   const navRef = useRef<HTMLElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const userMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     api.get<ConversationOut[]>("/conversations").then(({ data }) => setConversations(data)).catch(() => {});
@@ -101,6 +109,49 @@ export default function Sidebar({ collapsed, onToggle, onMobileClose }: Props) {
     setMenuOpenId(null);
     setMenuPos(null);
   };
+
+  // ── User dropdown: 點外面 / Esc → 關閉 ─────────
+  useEffect(() => {
+    if (!userMenuOpen) return;
+    const onClick = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (userMenuRef.current && !userMenuRef.current.contains(target)) {
+        setUserMenuOpen(false);
+        setUserMenuPos(null);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setUserMenuOpen(false);
+        setUserMenuPos(null);
+      }
+    };
+    document.addEventListener("mousedown", onClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [userMenuOpen]);
+
+  const openUserMenu = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setUserMenuPos({
+      // 往上展開（profile 在 sidebar 底部），底邊靠近 trigger 頂部
+      top: rect.top - 8,
+      left: rect.left,
+    });
+    setUserMenuOpen(true);
+  };
+
+  const closeUserMenu = () => {
+    setUserMenuOpen(false);
+    setUserMenuPos(null);
+  };
+
+  const displayName = user?.display_name || user?.email?.split("@")[0] || "User";
+  const initial = (displayName.trim()[0] || "?").toUpperCase();
 
   const activeId = pathname.match(/\/chat\/([^/]+)/)?.[1] ?? null;
 
@@ -279,29 +330,48 @@ export default function Sidebar({ collapsed, onToggle, onMobileClose }: Props) {
 
       <Separator className="bg-zinc-800/60" />
 
-      {/* Logout */}
+      {/* User profile — 點擊往上彈出選單 */}
       <div className="px-2 py-2">
         {collapsed ? (
           <Tooltip>
             <TooltipTrigger
               render={
                 <button
-                  onClick={handleLogout}
-                  className="w-full flex items-center justify-center h-8 rounded-md text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+                  onClick={openUserMenu}
+                  className="w-full flex items-center justify-center h-8 rounded-md transition-colors hover:bg-zinc-800"
                 />
               }
             >
-              <LogOut size={14} />
+              <span
+                className="size-7 rounded-full flex items-center justify-center text-[12px] font-bold"
+                style={{ background: "#B2B1A7", color: "#1F1F1E" }}
+              >
+                {initial}
+              </span>
             </TooltipTrigger>
-            <TooltipContent side="right">登出</TooltipContent>
+            <TooltipContent side="right">{displayName}</TooltipContent>
           </Tooltip>
         ) : (
           <button
-            onClick={handleLogout}
-            className="w-full flex items-center gap-2 px-2.5 h-8 rounded-md text-xs text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+            onClick={openUserMenu}
+            className="w-full flex items-center gap-2 px-2 h-10 rounded-md hover:bg-zinc-800 transition-colors"
           >
-            <LogOut size={13} className="shrink-0" />
-            <span>登出</span>
+            <span
+              className="shrink-0 size-7 rounded-full flex items-center justify-center text-[12px] font-bold"
+              style={{ background: "#B2B1A7", color: "#1F1F1E" }}
+            >
+              {initial}
+            </span>
+            <span
+              className="flex-1 min-w-0 text-left text-[13px] font-semibold truncate"
+              style={{ color: "#B2B1A7" }}
+            >
+              {displayName}
+            </span>
+            <span className="shrink-0 flex flex-col items-center text-zinc-300">
+              <ChevronUp size={11} strokeWidth={2.25} />
+              <ChevronDown size={11} strokeWidth={2.25} className="-mt-1" />
+            </span>
           </button>
         )}
       </div>
@@ -389,6 +459,53 @@ export default function Sidebar({ collapsed, onToggle, onMobileClose }: Props) {
         </div>
       </div>
     )}
+
+    {/* User Dropdown — fixed 定位往上彈出 */}
+    {userMenuOpen && userMenuPos && (
+      <div
+        ref={userMenuRef}
+        style={{ left: userMenuPos.left, bottom: window.innerHeight - userMenuPos.top }}
+        className={cn(
+          "fixed z-50 w-56 rounded-lg border border-zinc-700 bg-zinc-800 shadow-lg",
+          "p-1"
+        )}
+      >
+        {/* Email — 純資訊列 */}
+        <div className="px-2.5 py-2 text-[12px] text-zinc-400 truncate border-b border-zinc-700/60">
+          {user?.email ?? "—"}
+        </div>
+        <button
+          onClick={() => {
+            closeUserMenu();
+            setHelpOpen(true);
+          }}
+          className={cn(
+            "w-full flex items-center gap-2 px-2.5 py-2 rounded-md",
+            "text-[13px] text-zinc-200 hover:bg-zinc-700 transition-colors",
+            "border-b border-zinc-700/60"
+          )}
+        >
+          <HelpCircle size={13} className="text-zinc-400" />
+          Get help
+        </button>
+        <button
+          onClick={() => {
+            closeUserMenu();
+            handleLogout();
+          }}
+          className={cn(
+            "w-full flex items-center gap-2 px-2.5 py-2 rounded-md",
+            "text-[13px] text-zinc-200 hover:bg-zinc-700 transition-colors",
+            "border-b border-zinc-700/60"
+          )}
+        >
+          <LogOut size={13} className="text-zinc-400" />
+          Log out
+        </button>
+      </div>
+    )}
+
+    <HelpPanel open={helpOpen} onClose={() => setHelpOpen(false)} />
 
     {/* Delete confirmation modal */}
     {confirmingConv && (

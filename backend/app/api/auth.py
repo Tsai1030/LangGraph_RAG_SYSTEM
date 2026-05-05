@@ -1,9 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, Response, Cookie, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.dependencies import get_current_user
 from app.core.security import create_access_token, create_refresh_token, verify_token
 from app.database import get_db
-from app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse
+from app.models.user import User
+from app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse, UserOut
 from app.services.auth_service import register_user, authenticate_user
 from app.config import settings
 
@@ -63,3 +65,8 @@ async def refresh(
 async def logout(response: Response):
     response.delete_cookie(key=REFRESH_COOKIE_KEY, path="/api/auth")
     return {"message": "Logged out"}
+
+
+@router.get("/me", response_model=UserOut)
+async def get_me(current_user: User = Depends(get_current_user)):
+    return UserOut.model_validate(current_user)

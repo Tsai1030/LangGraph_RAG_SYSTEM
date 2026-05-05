@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import api from "@/lib/api";
 import { useChatStore } from "@/store/chatStore";
 import type { ConversationOut } from "@/types";
+import FormPickerButton from "@/components/chat/FormPickerButton";
 
 const SUGGESTIONS = [
   { q: "工地施工動線規劃", icon: Route },
@@ -45,11 +46,15 @@ export default function NewPage() {
 
   const inputBox = (placeholder: string) => (
     <div className={cn(
-      "flex items-end gap-2 rounded-4xl border bg-white shadow-sm px-4 py-3 transition-all duration-200",
+      "flex items-end gap-2 rounded-4xl border bg-white shadow-sm px-3 py-3 transition-all duration-200",
       creating
         ? "border-zinc-200 opacity-60"
         : "border-zinc-200 hover:border-zinc-300 focus-within:border-zinc-400 focus-within:shadow-lg"
     )}>
+      <FormPickerButton
+        onSendMessage={(msg) => handleSend(msg)}
+        disabled={creating}
+      />
       <textarea
         ref={textareaRef}
         value={value}
