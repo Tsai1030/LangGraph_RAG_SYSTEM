@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Components } from "react-markdown";
-import { X } from "lucide-react";
+import { X, Copy } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { MessageOut, FormFile, Source } from "@/types";
 import SourcesPanel from "./SourcesPanel";
@@ -52,6 +52,79 @@ function Lightbox({ src, alt, onClose }: { src: string; alt: string; onClose: ()
   );
 }
 
+/** 將 DOM table 轉回 markdown（純文字版）給複製用。 */
+function tableElementToMarkdown(table: HTMLTableElement): string {
+  const rowToCells = (tr: HTMLTableRowElement): string[] =>
+    Array.from(tr.querySelectorAll("th, td")).map((c) =>
+      (c.textContent ?? "").trim().replace(/\s*\|\s*/g, "\\|")
+    );
+
+  const headerEl = table.querySelector("thead tr") as HTMLTableRowElement | null;
+  const bodyRows = Array.from(table.querySelectorAll("tbody tr")) as HTMLTableRowElement[];
+
+  const headerCells = headerEl ? rowToCells(headerEl) : [];
+  // 若沒有 thead，把 tbody 第一列當 header
+  const fallbackHeader = !headerEl && bodyRows.length > 0 ? rowToCells(bodyRows[0]) : null;
+  const dataRows = (fallbackHeader ? bodyRows.slice(1) : bodyRows).map(rowToCells);
+  const finalHeader = headerCells.length ? headerCells : fallbackHeader ?? [];
+  if (!finalHeader.length) return "";
+
+  const colCount = finalHeader.length;
+  const lines = [
+    "| " + finalHeader.join(" | ") + " |",
+    "|" + Array(colCount).fill("---").join("|") + "|",
+    ...dataRows.map((r) => "| " + r.concat(Array(colCount - r.length).fill("")).join(" | ") + " |"),
+  ];
+  return lines.join("\n");
+}
+
+/** 表格容器：橫向 scroll + hover 時左上角顯示複製按鈕（複製 markdown 格式）。 */
+function TableWithCopy({ children }: { children: React.ReactNode }) {
+  const tableRef = useRef<HTMLTableElement>(null);
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(async () => {
+    const t = tableRef.current;
+    if (!t) return;
+    const md = tableElementToMarkdown(t);
+    if (!md) return;
+    try {
+      await navigator.clipboard.writeText(md);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // 寫入失敗（e.g. 沒授權）忽略；可未來補 toast
+    }
+  }, []);
+
+  return (
+    <div className="group relative my-3 max-w-full overflow-x-auto">
+      {/* 複製按鈕 — 表格 hover 才顯出；按鈕 hover 顯示淺灰底 + 下方 tooltip */}
+      <button
+        onClick={handleCopy}
+        aria-label="複製表格"
+        className={cn(
+          "peer absolute top-1 right-1 z-10 size-7 rounded flex items-center justify-center",
+          "opacity-0 group-hover:opacity-100 transition-opacity",
+          "hover:bg-zinc-200/70"
+        )}
+      >
+        <Copy size={13} className="text-zinc-500" />
+      </button>
+      <span
+        className={cn(
+          "pointer-events-none absolute top-9 right-1 z-10 px-2 py-1 rounded-md whitespace-nowrap",
+          "text-[11px] bg-zinc-900 text-white shadow-md transition-opacity",
+          copied ? "opacity-100" : "opacity-0 peer-hover:opacity-100"
+        )}
+      >
+        {copied ? "已複製" : "複製表格"}
+      </span>
+      <table ref={tableRef} className="!my-0">{children}</table>
+    </div>
+  );
+}
+
 function createMarkdownComponents(onImageClick: (src: string, alt: string) => void): Components {
   return {
     p: ({ children }) => <div className="my-1.5 leading-relaxed">{children}</div>,
@@ -71,6 +144,9 @@ function createMarkdownComponents(onImageClick: (src: string, alt: string) => vo
         </figure>
       );
     },
+    // 表格寬於聊天區時，把橫向 scroll 限制在表格自己的容器，
+    // 避免整個聊天視窗被推寬產生外層 horizontal scroll
+    table: ({ children }) => <TableWithCopy>{children}</TableWithCopy>,
   };
 }
 

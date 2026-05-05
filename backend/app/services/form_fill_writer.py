@@ -184,7 +184,8 @@ def get_filled_path(token: str) -> Path | None:
 
 def delete_generated_for_conversation(conversation_id: str) -> int:
     """
-    刪除 GENERATED_DIR 下所有以 <conversation_id>_ 開頭的 .docx。
+    刪除 GENERATED_DIR 下所有以 <conversation_id>_ 開頭的產出檔
+    （含靜態填寫 .docx 與動態匯出 .xlsx / .csv）。
     回傳成功刪除的檔案數；單檔失敗會記 log 但不中斷。
 
     路徑穿越防護：conversation_id 不接受任何 path separator 或父層引用，
@@ -197,13 +198,15 @@ def delete_generated_for_conversation(conversation_id: str) -> int:
     if not GENERATED_DIR.exists():
         return 0
 
-    pattern = f"{conversation_id}_*.docx"
     deleted = 0
-    for path in GENERATED_DIR.glob(pattern):
+    gen_resolved = GENERATED_DIR.resolve()
+    for path in GENERATED_DIR.glob(f"{conversation_id}_*"):
+        if not path.is_file():
+            continue
         # 二次驗證：解析後仍位於 GENERATED_DIR 內
         try:
             resolved = path.resolve()
-            if GENERATED_DIR.resolve() not in resolved.parents:
+            if gen_resolved not in resolved.parents:
                 logger.warning("[form_fill] skip path outside GENERATED_DIR: %s", resolved)
                 continue
             path.unlink()
@@ -211,5 +214,5 @@ def delete_generated_for_conversation(conversation_id: str) -> int:
         except OSError as exc:
             logger.warning("[form_fill] failed to delete %s: %s", path.name, exc)
     if deleted:
-        logger.info("[form_fill] deleted %d generated docx for conversation %s", deleted, conversation_id)
+        logger.info("[form_fill] deleted %d generated files for conversation %s", deleted, conversation_id)
     return deleted

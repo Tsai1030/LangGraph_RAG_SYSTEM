@@ -175,9 +175,9 @@ body {
 .prose-chat h1, .prose-chat h2, .prose-chat h3, .prose-chat h4 {
   font-weight: 600; color: #09090b; margin: 1.1em 0 0.4em;
 }
-.prose-chat h1 { font-size: 1.15em; }
-.prose-chat h2 { font-size: 1.05em; }
-.prose-chat h3 { font-size: 0.97em; }
+.prose-chat h1 { font-size: 1.6em; }
+.prose-chat h2 { font-size: 1.4em; }
+.prose-chat h3 { font-size: 1.3em; }   /* 表名使用 ### 大標題 */
 
 .prose-chat div.my-1\.5 { margin-top: 0.375rem; margin-bottom: 0.375rem; }
 .prose-chat div.my-1\.5:first-child { margin-top: 0; }
@@ -202,13 +202,30 @@ body {
 }
 .prose-chat pre code { background: none; border: none; padding: 0; color: #3f3f46; }
 
-.prose-chat table { width: 100%; border-collapse: collapse; margin: 0.75em 0; font-size: 0.88em; }
-.prose-chat th {
-  background: #f4f4f5; border: 1px solid #e4e4e7;
-  padding: 6px 12px; text-align: left; font-weight: 600; color: #3f3f46;
+/* 表格樣式：標題粗體、無背景色、無縱軸線；標題下深灰分隔線、列間淺灰分隔線 */
+.prose-chat table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.75em 0;
+  font-size: 0.88em;
 }
-.prose-chat td { border: 1px solid #e4e4e7; padding: 6px 12px; color: #3f3f46; }
-.prose-chat tr:nth-child(even) td { background: #fafafa; }
+.prose-chat th {
+  padding: 8px 12px;
+  text-align: left;
+  font-weight: 700;
+  color: #09090b;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid #71717a; /* zinc-500，標題下方分隔線 */
+}
+.prose-chat td {
+  padding: 8px 12px;
+  color: #3f3f46;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid #d4d4d8; /* zinc-300，列間分隔線（較標題線淡，保層次）*/
+}
+.prose-chat tr:last-child td { border-bottom: 0; } /* 最後一列不重複底線（與 wrapper 邊框疊合）*/
 
 .prose-chat blockquote {
   border-left: 2px solid #d4d4d8; padding-left: 1em;

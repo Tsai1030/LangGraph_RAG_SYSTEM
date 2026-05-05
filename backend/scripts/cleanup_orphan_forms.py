@@ -3,7 +3,7 @@ cleanup_orphan_forms.py — 一次性掃描並刪除 orphan 殘留資料
 
 orphan 定義：對應的 conversation_id 已不存在於 app.db.conversations，
 但仍有以下殘留：
-  - generated_forms/<conv_id>_*.docx
+  - generated_forms/<conv_id>_*.{docx,xlsx,csv}
   - langgraph.db checkpoints / writes 表中以該 conv_id 為 thread_id 的列
 
 執行方式（在 backend/ 目錄）：
@@ -47,15 +47,19 @@ def _orphan_thread_ids(langgraph_db: Path, valid_ids: set[str]) -> list[str]:
     return sorted(all_threads - valid_ids)
 
 
-def _orphan_docx(gen_dir: Path, valid_ids: set[str]) -> list[Path]:
-    """generated_forms 中 prefix 不在 valid_ids 內的 .docx。"""
+_GENERATED_EXTS = ("docx", "xlsx", "csv")
+
+
+def _orphan_files(gen_dir: Path, valid_ids: set[str]) -> list[Path]:
+    """generated_forms 中 prefix 不在 valid_ids 內的產出檔（docx / xlsx / csv）。"""
     if not gen_dir.exists():
         return []
     orphans: list[Path] = []
-    for path in gen_dir.glob("*.docx"):
-        conv_part = path.name.split("_", 1)[0]
-        if conv_part not in valid_ids:
-            orphans.append(path)
+    for ext in _GENERATED_EXTS:
+        for path in gen_dir.glob(f"*.{ext}"):
+            conv_part = path.name.split("_", 1)[0]
+            if conv_part not in valid_ids:
+                orphans.append(path)
     return sorted(orphans)
 
 
@@ -76,7 +80,7 @@ def _delete_threads(langgraph_db: Path, thread_ids: Iterable[str]) -> int:
 
 
 def _delete_files(paths: Iterable[Path]) -> int:
-    """刪除指定 .docx；二次驗證仍位於 GENERATED_DIR 之內。"""
+    """刪除指定產出檔（docx / xlsx / csv）；二次驗證仍位於 GENERATED_DIR 之內。"""
     gen_resolved = GENERATED_DIR.resolve()
     n = 0
     for path in paths:
@@ -113,7 +117,7 @@ def main() -> int:
     else:
         print(f"langgraph.db not found（跳過）: {LANGGRAPH_DB}")
 
-    orphan_files = _orphan_docx(GENERATED_DIR, valid_ids)
+    orphan_files = _orphan_files(GENERATED_DIR, valid_ids)
 
     print()
     print(f"orphan langgraph threads: {len(orphan_threads)}")
@@ -123,7 +127,7 @@ def main() -> int:
         if len(orphan_threads) > 5:
             print(f"  ...（另 {len(orphan_threads) - 5} 筆）")
 
-    print(f"orphan .docx files: {len(orphan_files)}")
+    print(f"orphan generated files (docx/xlsx/csv): {len(orphan_files)}")
     for path in orphan_files[:10]:
         print(f"  - {path.name}")
     if len(orphan_files) > 10:
@@ -139,7 +143,7 @@ def main() -> int:
     n_threads = _delete_threads(LANGGRAPH_DB, orphan_threads) if LANGGRAPH_DB.exists() else 0
     n_files = _delete_files(orphan_files)
     print(f"deleted langgraph rows (checkpoints): {n_threads}")
-    print(f"deleted .docx files: {n_files}")
+    print(f"deleted generated files (docx/xlsx/csv): {n_files}")
     return 0
 
 
