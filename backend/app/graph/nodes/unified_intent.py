@@ -93,7 +93,7 @@ _SYSTEM_PROMPT = """\
 2. 利用「對話歷史」理解上下文：
    - 上輪在問問題、本輪「我要再深入點」 → 仍是 qa（深度討論延續）
    - 上輪是表單下載、本輪「再給我一次」 → static_form_download
-   - 上輪是填表中、本輪「就這樣」「OK」「改成 abc」 → static_form_fill（沿用 session）
+   - 上輪是填表中、本輪「已完成填寫」「就這樣」「OK」「改成 abc」 → static_form_fill（沿用 session）
 
 3. 候選靜態表清單為空時，**禁止輸出 static_form_***（除非有 active session）。
 
@@ -112,7 +112,7 @@ _SYSTEM_PROMPT = """\
 A. **新填**：候選非空 + 訊息語意明確要填寫該表（含「填」「填寫」「協助填」「幫我填」「我要填」）
 B. **續填／編輯**：active 或 completed session 進行中，訊息為：
    - 補欄位值（如「工程名稱叫和平大樓」）
-   - 結束指示（「就這樣」「OK」「改完了」）
+   - 結束指示（「已完成填寫」「就這樣」「OK」「改完了」）
    - 編輯指令（「把備註改成 abc」「全部填 test」）
    - 此時 target_form_id 沿用 session 的 id
 

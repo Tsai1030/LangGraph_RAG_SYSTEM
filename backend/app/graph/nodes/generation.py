@@ -111,17 +111,29 @@ _STATIC_FORM_SYSTEM = """\
 
 
 _FILL_COLLECT_SYSTEM = """\
-你是表單填寫助理，正引導使用者把資料填入靜態表單。請以繁體中文簡潔回應（120字內）。
+你是表單填寫助理，正引導使用者把資料填入靜態表單。請以繁體中文簡潔回應（≤180 字）。
 
-回應原則：
-- 先一句確認本輪做了什麼（收到欄位 / 完成批次編輯 / 代寫了內容）
-- 若本輪有「AI 代寫的欄位」：**完整列出代寫內容讓使用者過目**（一個欄位一行），告知可說「把 X 改成 Y」修改
-- 若仍有待填欄位：列出下一批 3-5 個關鍵欄位 label
-- 末段務必清楚提示兩個選項：
-  1. 一次描述多個欄位繼續補（或對代寫內容說『改成…』修改）
-  2. **輸入「就這樣」或「全部填 test」可立即產出填好的檔案下載**
-- 嚴禁列出超過 5 個未填欄位
-- 嚴禁輸出 markdown 表格或欄位 key（如 tbl0_r2_status）"""
+【目標】讓使用者「一眼看懂在填什麼」，不必看欄位編號或 key 即可作答。
+
+【回應結構（依序）】
+1. 開頭一句：以「《表單名稱》進度 N／M」起頭，並說明本輪做了什麼
+   - 首次進入（is_first_turn=true）說「已開始填寫」
+   - 其他情況說「已收到 X 欄／已完成 N 個批次更新／已代寫 N 個欄位」其中之一
+2. 主體（聚焦 user prompt 提供的「目前項目」，不要跨項目）：
+   - 第一行寫項目標題（例：「目前項目：2.1 組織提報」）
+   - 之後每行一個子欄位，格式：
+       - <子欄位名>：<填法提示>（已填則加上『已填：xxx』、未填則加上『待填』）
+   - 填法提示直接引用 user prompt 的「類型提示」字串
+3. 若 is_first_turn=true，接一行示範：「例：『已完成，備註 OK』」（用真實項目語意改寫）
+4. 若本輪有「AI 代寫的欄位」：再加一段「我幫你寫了：」逐欄列出代寫內容，告知可說「把 X 改成 Y」修改
+5. 結尾固定獨立一行（與主體空一行）：
+     輸入「已完成填寫」立即產出檔案；想換到下個項目輸入「繼續填寫下一頁」；或「全部填 test」一鍵補滿測試值。
+
+【嚴禁】
+- 一次跨多個項目（只能聚焦 user prompt 給的「目前項目」）
+- 列出欄位 key（如 tbl0_r2_status）
+- markdown 表格、編號清單序號（用「- 」即可）
+- 在 is_first_turn=false 時重複示範語句"""
 
 _FILL_DONE_SYSTEM = """\
 表單已填寫完成。請用一句繁體中文（30字內）告知使用者並提示點擊下方下載。
@@ -130,7 +142,12 @@ _FILL_DONE_SYSTEM = """\
 
 
 def _build_fill_collect_user(state: GraphState) -> str:
-    """組裝填表追問用的 user prompt：本輪訊息 + 已收集 + 仍缺欄位 label 清單"""
+    """組裝填表追問用的 user prompt。
+
+    與 _FILL_COLLECT_SYSTEM 配合：把 schema 解析成「使用者語意上同一個項目」的群組，
+    每輪只暴露第一個尚未完成的群組給 LLM，並附上每個子欄位的填法提示與當前值。
+    """
+    from app.graph.nodes.form_fill import TYPE_HINT, group_fields, select_next_group
     from app.services.form_fill_writer import load_schema
 
     session = state.get("form_fill_session") or {}
@@ -139,14 +156,15 @@ def _build_fill_collect_user(state: GraphState) -> str:
     title = (schema or {}).get("title", "靜態表單")
     fields = (schema or {}).get("fields", [])
     collected = session.get("collected", {})
+    skipped_groups: list[str] = session.get("skipped_groups", [])
 
-    required_pending = [f for f in fields if f.get("required") and f["key"] not in collected]
-    optional_pending = [f for f in fields if not f.get("required") and f["key"] not in collected]
-    next_batch = required_pending + optional_pending[: max(0, 5 - len(required_pending))]
-    next_batch = next_batch[:5]
+    groups = group_fields(fields)
+    pending_groups = [
+        g for g in groups
+        if any(f["key"] not in collected for f in g["fields"])
+    ]
+    next_group = select_next_group(groups, collected, skipped_groups)
 
-    pending_labels = [f["label"] for f in next_batch]
-    total_pending = len(required_pending) + len(optional_pending)
     bulk_edit = session.get("last_bulk_edit")
     ghost_keys = session.get("last_ghost_written") or []
     ghost_items = [
@@ -154,11 +172,14 @@ def _build_fill_collect_user(state: GraphState) -> str:
          "value": collected.get(k, "")}
         for k in ghost_keys
     ]
+    is_first_turn = not collected and not bulk_edit and not ghost_items
 
     parts = [
         f"目標表單：{title}",
         f"使用者本輪訊息：{state['query']}",
-        f"已收集欄位總數：{len(collected)} / {len(fields)}",
+        f"進度：{len(collected)} / {len(fields)} 欄已填，剩 {len(pending_groups)} 個項目"
+        + (f"（已跳過 {len(skipped_groups)} 個）" if skipped_groups else ""),
+        f"is_first_turn：{str(is_first_turn).lower()}",
     ]
     if ghost_items:
         ghost_lines = "\n".join(
@@ -168,11 +189,20 @@ def _build_fill_collect_user(state: GraphState) -> str:
         parts.append(f"本輪 AI 代寫的欄位（請在回應中讓使用者過目並可改）：\n{ghost_lines}")
     if bulk_edit:
         parts.append(f"本輪批次編輯結果：{bulk_edit}")
-    parts.append(f"仍待填欄位總數：{total_pending}")
-    if pending_labels:
-        parts.append("下一批請追問的欄位 label：\n" + "\n".join(f"- {l}" for l in pending_labels))
+
+    if next_group:
+        sub_lines = []
+        for f in next_group["fields"]:
+            hint = TYPE_HINT.get(f.get("type", "text"), "文字")
+            cur = collected.get(f["key"], "")
+            state_str = f"已填：{cur}" if cur else "待填"
+            sub_lines.append(f"- {f['sub_label']}（類型提示：{hint}；{state_str}）")
+        parts.append(
+            f"目前項目：{next_group['title']}\n"
+            f"本項目欄位（請依此引導使用者）：\n" + "\n".join(sub_lines)
+        )
     else:
-        parts.append("已沒有未填欄位，請告訴使用者：「全部欄位都已填寫，輸入『就這樣』即可下載填好的檔案」")
+        parts.append("已沒有未填欄位，請告訴使用者：「全部欄位都已填寫，輸入『已完成填寫』即可下載填好的檔案」")
     return "\n".join(parts)
 
 

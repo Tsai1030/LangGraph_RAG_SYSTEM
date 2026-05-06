@@ -290,8 +290,21 @@ def main() -> None:
         if not path.exists():
             print(f"!! 找不到檔案：{path}")
             continue
-        schema = build_schema(form, path)
         out_path = OUT_DIR / f"{form['form_id']}.json"
+
+        # 若已有 manual schema（人工撰寫，例如 010315 由 build_010315_schema.py 產生），
+        # 不要覆蓋。manual schema 帶 "manual": true 旗標，summary 仍會記入。
+        if out_path.exists():
+            try:
+                existing = json.loads(out_path.read_text(encoding="utf-8"))
+                if existing.get("manual"):
+                    schemas.append(existing)
+                    print(f"--  {form['form_id']}: manual schema, {len(existing['fields'])} fields (skipped)")
+                    continue
+            except (json.JSONDecodeError, OSError):
+                pass  # 壞檔就讓它被覆蓋
+
+        schema = build_schema(form, path)
         out_path.write_text(
             json.dumps(schema, ensure_ascii=False, indent=2),
             encoding="utf-8",

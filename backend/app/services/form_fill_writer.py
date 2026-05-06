@@ -75,6 +75,20 @@ def _normalize_value(value: Any, field_type: str) -> str:
 # 段落填入：以 regex 取代 marker 後的既有值，達到 idempotent
 # ──────────────────────────────────────────────────────────────────
 
+def _replace_marker_in_text(text: str, marker: str, marker_end: str | None, value: str) -> str:
+    """在 text 內把「marker + 舊值（+ marker_end）」取代為「marker 新值（+ marker_end）」。
+
+    - marker_end=None：吃到 \\t 或行尾為止（最常見場景，如「工程名稱：xxx\\t」）
+    - marker_end 指定：marker 與 marker_end 中間的內容整段取代為 value，保留 marker_end
+      （適用於跨 \\t 區段的場景，如段落「年\\t月\\t日」用 marker='年' marker_end='日'）
+    """
+    if marker_end:
+        pattern = re.compile(re.escape(marker) + r"[^\n]*?" + re.escape(marker_end))
+        return pattern.sub(f"{marker} {value}{marker_end}", text, count=1)
+    pattern = re.compile(re.escape(marker) + r"[^\t\n]*")
+    return pattern.sub(f"{marker} {value}", text, count=1)
+
+
 def _fill_paragraphs(doc, schema: dict, collected: dict[str, str]) -> int:
     """
     將段落類型的欄位值寫入。同一段落內的多個 marker 一次處理完再 rewrite。
@@ -97,10 +111,9 @@ def _fill_paragraphs(doc, schema: dict, collected: dict[str, str]) -> int:
         original = text
         for f in fields:
             marker = f["loc"]["marker"]
+            marker_end = f["loc"].get("marker_end")
             value = _normalize_value(collected[f["key"]], f["type"])
-            # marker 後吃掉到下一個 \t 或行尾的舊值，再寫入新值
-            pattern = re.compile(re.escape(marker) + r"[^\t\n]*")
-            new_text = pattern.sub(f"{marker} {value}", text, count=1)
+            new_text = _replace_marker_in_text(text, marker, marker_end, value)
             if new_text != text:
                 text = new_text
                 written += 1
@@ -120,10 +133,34 @@ def _fill_paragraphs(doc, schema: dict, collected: dict[str, str]) -> int:
 # 表格填入
 # ──────────────────────────────────────────────────────────────────
 
+def _write_cell_marker(cell, marker: str, marker_end: str | None, value: str) -> bool:
+    """在 cell 內找到含 marker 的 paragraph，取代 marker 後的內容為 value。
+
+    一個 cell 可能含多個 paragraph；只取代第一個含 marker 的。
+    保留第一個 run 的格式。
+    """
+    for para in cell.paragraphs:
+        text = para.text
+        if marker not in text:
+            continue
+        new_text = _replace_marker_in_text(text, marker, marker_end, value)
+        if new_text == text:
+            return False
+        if not para.runs:
+            para.add_run(new_text)
+        else:
+            para.runs[0].text = new_text
+            for run in para.runs[1:]:
+                run.text = ""
+        return True
+    return False
+
+
 def _fill_cells(doc, schema: dict, collected: dict[str, str]) -> int:
     written = 0
     for f in schema["fields"]:
-        if f["loc"]["kind"] != "cell":
+        kind = f["loc"]["kind"]
+        if kind not in ("cell", "cell_marker"):
             continue
         if f["key"] not in collected or collected[f["key"]] in (None, ""):
             continue
@@ -135,8 +172,14 @@ def _fill_cells(doc, schema: dict, collected: dict[str, str]) -> int:
             logger.warning("[form_fill] cell loc out of range: %s", loc)
             continue
         value = _normalize_value(collected[f["key"]], f["type"])
-        cell.text = value
-        written += 1
+        if kind == "cell":
+            cell.text = value
+            written += 1
+        else:  # cell_marker
+            if _write_cell_marker(cell, loc["marker"], loc.get("marker_end"), value):
+                written += 1
+            else:
+                logger.warning("[form_fill] cell_marker not found in cell: %s", loc)
     return written
 
 
