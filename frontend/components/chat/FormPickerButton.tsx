@@ -229,9 +229,11 @@ export default function FormPickerButton({ onSendMessage, disabled }: Props) {
                       {isActive && (
                         <div
                           className={cn(
-                            "absolute left-full top-0 ml-1 z-10",
-                            "w-40 rounded-lg border border-zinc-200 bg-white shadow-lg",
-                            "p-1"
+                            "absolute z-10 rounded-lg border border-zinc-200 bg-white shadow-lg p-1",
+                            // 桌面：彈到 active row 右側
+                            "left-full top-0 ml-1 w-40",
+                            // 手機：依 active row 對齊頂部，靠在該列右側內緣（不外溢、不固定貼標題列）
+                            "max-sm:left-auto max-sm:right-0 max-sm:ml-0 max-sm:w-36"
                           )}
                         >
                           <button
