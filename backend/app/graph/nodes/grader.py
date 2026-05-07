@@ -61,7 +61,18 @@ _REWRITER_SYSTEM = """\
 3. 輸出 4–10 個字的名詞短語，不要輸出完整句子
 4. 以工程規範文件最可能使用的正式術語輸出，避免口語化
 
-只輸出改寫後的查詢字串，不要輸出其他內容。"""
+【無主題逃生口】
+若原始問題屬於下列情況，請**原樣輸出原始問題字串**，不要編造關鍵字、不要輸出「未明」
+「無主題」「無法判斷」「不確定」之類的描述性文字：
+- 寒暄／招呼語（hi、hello、你好、嗨、哈囉、早安、謝謝、感謝、ok、好）
+- 過短且無實質主題（少於 3 字且非工程術語）
+- 明顯與營造／工程規範無關的閒聊
+
+只輸出改寫後的查詢字串（或原樣回傳的原始問題），不要輸出其他內容。"""
+
+
+# rewriter 失敗訊號：LLM 放棄改寫時常見的描述性詞彙；命中即視為改寫失敗，fallback 回原 query
+_REWRITER_FAILURE_SIGNALS = ("未明", "無主題", "無法", "不確定", "無相關", "不清楚", "無關")
 
 
 async def retrieval_grader(state: GraphState) -> dict:
@@ -140,13 +151,34 @@ async def query_rewriter(state: GraphState) -> dict:
     ])
 
     rewritten = result.content.strip()
-    logger.info(
-        "[query_rewriter] retry=%d  '%s' → '%s'  (missing: '%s')",
-        retry_count + 1,
-        original_query,
-        rewritten,
-        missing_info[:60] if missing_info else "",
-    )
+
+    # Sanity check：擋掉 LLM 放棄改寫時的垃圾輸出，避免污染下次檢索
+    fallback_reason = None
+    if not rewritten:
+        fallback_reason = "empty"
+    elif any(sig in rewritten for sig in _REWRITER_FAILURE_SIGNALS):
+        fallback_reason = "failure_signal"
+    elif len(rewritten) > 40:
+        # 改寫後過長代表 LLM 沒照「4–10 字短語」格式輸出，多半是說明文字
+        fallback_reason = "too_long"
+
+    if fallback_reason:
+        logger.warning(
+            "[query_rewriter] fallback (%s)  retry=%d  '%s' → '%s'  使用原始 query",
+            fallback_reason,
+            retry_count + 1,
+            original_query,
+            rewritten,
+        )
+        rewritten = original_query
+    else:
+        logger.info(
+            "[query_rewriter] retry=%d  '%s' → '%s'  (missing: '%s')",
+            retry_count + 1,
+            original_query,
+            rewritten,
+            missing_info[:60] if missing_info else "",
+        )
 
     return {
         "retrieval_query": rewritten,
