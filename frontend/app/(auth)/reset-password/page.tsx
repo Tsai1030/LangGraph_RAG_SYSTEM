@@ -1,12 +1,20 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Eye, EyeOff } from "lucide-react";
 import { resetPassword } from "@/lib/auth";
 
 export default function ResetPasswordPage() {
+  return (
+    <Suspense fallback={<div className="text-sm text-zinc-500">載入中…</div>}>
+      <ResetPasswordForm />
+    </Suspense>
+  );
+}
+
+function ResetPasswordForm() {
   const router = useRouter();
   const params = useSearchParams();
   const [token, setToken] = useState<string | null>(null);
