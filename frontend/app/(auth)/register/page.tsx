@@ -25,8 +25,13 @@ export default function RegisterPage() {
     try {
       await register(form.email, form.password, form.name || undefined);
       router.replace("/new");
-    } catch {
-      setError("註冊失敗，Email 可能已被使用");
+    } catch (err: unknown) {
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      if (status === 429) {
+        setError("嘗試太頻繁，請稍候 1 分鐘再試");
+      } else {
+        setError("註冊失敗，Email 可能已被使用");
+      }
     } finally {
       setLoading(false);
     }
@@ -139,6 +144,13 @@ export default function RegisterPage() {
           )}
           {loading ? "建立中…" : "建立帳號"}
         </button>
+
+        {/* 隱私聲明 — admin 可查閱對話紀錄 */}
+        <p className="text-[11px] leading-relaxed text-zinc-400 text-center">
+          建立帳號即表示同意：為提供服務品質支援與系統管理，
+          <br className="hidden sm:block" />
+          管理員可能查閱您於本系統的對話紀錄。
+        </p>
       </form>
 
       <p className="mt-6 text-center text-xs text-zinc-400">

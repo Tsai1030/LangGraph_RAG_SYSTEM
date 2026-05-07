@@ -38,6 +38,17 @@ class Settings(BaseSettings):
     # App
     app_env: str = "development"
     cors_origins: str = "http://localhost:3000"
+    frontend_url: str = "http://localhost:3000"  # 用於組 password reset 連結
+
+    # Admin Bootstrap
+    initial_admin_email: str = ""
+
+    # SMTP (for password reset email)
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from_name: str = ""
 
     # LangSmith (optional)
     langchain_tracing_v2: str = "false"

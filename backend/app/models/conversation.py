@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, String, DateTime, ForeignKey
+from sqlalchemy import Boolean, String, DateTime, ForeignKey, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -37,4 +37,8 @@ class Conversation(Base):
     summary: Mapped["ConversationSummary | None"] = relationship(
         "ConversationSummary", back_populates="conversation",
         cascade="all, delete-orphan", uselist=False
+    )
+
+    __table_args__ = (
+        Index("idx_conv_user_updated", "user_id", "updated_at"),
     )

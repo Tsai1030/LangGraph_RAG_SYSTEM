@@ -22,6 +22,16 @@ build/
 
 # ChromaDB 持久化資料
 backend/chroma_db/
+backend/chroma_dev_db/
+backend/chroma_versions/
+
+# DEV worktree 用的資料庫 / 不入 git
+backend/app.dev.db
+backend/app.dev.db-shm
+backend/app.dev.db-wal
+backend/langgraph.dev.db
+backend/langgraph.dev.db-shm
+backend/langgraph.dev.db-wal
 
 # Alembic pycache
 backend/alembic/__pycache__/

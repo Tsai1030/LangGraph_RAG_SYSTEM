@@ -34,3 +34,23 @@ export async function tryRestoreSession(): Promise<boolean> {
     return false;
   }
 }
+
+export async function forgotPassword(email: string): Promise<void> {
+  await api.post("/auth/forgot-password", { email });
+}
+
+export async function resetPassword(token: string, new_password: string): Promise<void> {
+  const { data } = await api.post("/auth/reset-password", { token, new_password });
+  useAuthStore.getState().setAccessToken(data.access_token);
+}
+
+export async function changePassword(
+  current_password: string,
+  new_password: string
+): Promise<void> {
+  const { data } = await api.post("/auth/change-password", {
+    current_password,
+    new_password,
+  });
+  useAuthStore.getState().setAccessToken(data.access_token);
+}

@@ -53,7 +53,17 @@ api.interceptors.response.use(
       original.headers.Authorization = `Bearer ${newToken}`;
       return api(original);
     } catch {
+      // refresh 失敗：token_version 已被 bump（改密碼/停用/手動 revoke）。
+      // 清掉本機 auth 並導去 /login（避開 public 頁面以免無限轉跳）。
       useAuthStore.getState().clearAuth();
+      if (typeof window !== "undefined") {
+        const path = window.location.pathname;
+        const PUBLIC = ["/login", "/register", "/forgot-password", "/reset-password"];
+        const onPublic = PUBLIC.some((p) => path === p || path.startsWith(p + "/"));
+        if (!onPublic) {
+          window.location.href = "/login";
+        }
+      }
       return Promise.reject(error);
     } finally {
       _isRefreshing = false;

@@ -24,13 +24,17 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from urllib.parse import quote
 
 from app.config import settings
-from app.api import auth, conversations, chat, export
+from app.api import admin, auth, conversations, chat, export
 from app.core.dependencies import get_current_user
+from app.core.rate_limit import limiter
 from app.database import get_db
 from app.graph.builder import build_graph
 from app.models.user import User
@@ -50,11 +54,35 @@ def _resolve_chroma_path() -> str:
     return settings.chroma_persist_path
 
 
+async def _bootstrap_initial_admin() -> None:
+    """若 INITIAL_ADMIN_EMAIL 已設定且該 user 已存在但未為 admin，啟動時自動升級。
+    user 不存在則只印 warning（等對方註冊後重啟才會升級）。"""
+    if not settings.initial_admin_email:
+        return
+
+    from app.database import AsyncSessionLocal
+    from app.models.user import User
+    from sqlalchemy import select
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(User).where(User.email == settings.initial_admin_email))
+        user = result.scalar_one_or_none()
+        if not user:
+            print(f"[Bootstrap] INITIAL_ADMIN_EMAIL={settings.initial_admin_email} not registered yet — skipping admin promotion")
+            return
+        if user.role == "admin":
+            print(f"[Bootstrap] {user.email} is already admin — no change")
+            return
+        user.role = "admin"
+        await db.commit()
+        print(f"[Bootstrap] Promoted {user.email} to admin")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
     應用程式生命週期管理：
-    - Startup：開啟 aiosqlite 連線，初始化 AsyncSqliteSaver，編譯 LangGraph
+    - Startup：開啟 aiosqlite 連線，初始化 AsyncSqliteSaver，編譯 LangGraph，bootstrap admin
     - Shutdown：aiosqlite 連線由 context manager 自動關閉
     """
     # aiosqlite connection 維持整個 server 生命週期
@@ -74,6 +102,8 @@ async def lifespan(app: FastAPI):
         print(f"[Startup] FORM_MODEL={settings.form_model}")
         print(f"[Startup] EMBEDDING_MODEL={settings.embedding_model}")
 
+        await _bootstrap_initial_admin()
+
         yield
     # yield 結束（server 關閉）後，async with 自動關閉 conn
 
@@ -83,6 +113,11 @@ app = FastAPI(
     version="0.3.0",
     lifespan=lifespan,
 )
+
+# Rate limiting (slowapi) — must be wired before other middleware/routers
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
@@ -97,6 +132,7 @@ app.include_router(auth.router, prefix="/api")
 app.include_router(conversations.router, prefix="/api")
 app.include_router(chat.router, prefix="/api")
 app.include_router(export.router, prefix="/api")
+app.include_router(admin.router, prefix="/api")
 
 _img_dir = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "data_markdown", "img")

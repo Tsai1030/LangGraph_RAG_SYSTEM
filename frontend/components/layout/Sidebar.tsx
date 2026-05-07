@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Image from "next/image";
-import { Plus, Trash2, LogOut, Pencil, X, PanelLeft, MessageSquare, MoreHorizontal, HelpCircle, ChevronUp, ChevronDown } from "lucide-react";
+import { Plus, Trash2, LogOut, Pencil, X, PanelLeft, MessageSquare, MoreHorizontal, HelpCircle, ChevronUp, ChevronDown, Shield } from "lucide-react";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
@@ -474,6 +474,22 @@ export default function Sidebar({ collapsed, onToggle, onMobileClose }: Props) {
         <div className="px-2.5 py-2 text-[12px] text-zinc-400 truncate border-b border-zinc-700/60">
           {user?.email ?? "—"}
         </div>
+        {user?.role === "admin" && (
+          <button
+            onClick={() => {
+              closeUserMenu();
+              router.push("/admin");
+            }}
+            className={cn(
+              "w-full flex items-center gap-2 px-2.5 py-2 rounded-md",
+              "text-[13px] text-zinc-200 hover:bg-zinc-700 transition-colors",
+              "border-b border-zinc-700/60"
+            )}
+          >
+            <Shield size={13} className="text-zinc-400" />
+            管理後台
+          </button>
+        )}
         <button
           onClick={() => {
             closeUserMenu();

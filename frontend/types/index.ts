@@ -8,6 +8,7 @@ export interface User {
   id: string;
   email: string;
   display_name: string | null;
+  role?: "user" | "admin";
 }
 
 // Conversations

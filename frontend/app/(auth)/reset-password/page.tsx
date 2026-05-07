@@ -1,35 +1,48 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Eye, EyeOff } from "lucide-react";
-import { login } from "@/lib/auth";
+import { resetPassword } from "@/lib/auth";
 
-export default function LoginPage() {
+export default function ResetPasswordPage() {
   const router = useRouter();
-  const [email, setEmail] = useState("");
+  const params = useSearchParams();
+  const [token, setToken] = useState<string | null>(null);
   const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
   const [showPwd, setShowPwd] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const t = params.get("token");
+    setToken(t);
+    if (!t) setError("連結無效或已過期");
+  }, [params]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    if (!token) return;
+    if (password.length < 8) {
+      setError("密碼至少 8 個字元");
+      return;
+    }
+    if (password !== confirm) {
+      setError("兩次密碼不一致");
+      return;
+    }
     setLoading(true);
     try {
-      await login(email, password);
+      await resetPassword(token, password);
       router.replace("/new");
     } catch (err: unknown) {
-      const status = (err as { response?: { status?: number } })?.response?.status;
-      if (status === 429) {
-        setError("嘗試太頻繁，請稍候 1 分鐘再試");
-      } else if (status === 403) {
-        setError("此帳號已停用，請聯絡管理員");
-      } else {
-        setError("Email 或密碼錯誤，請重試");
-      }
+      const detail =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? null;
+      setError(detail || "重設失敗，連結可能已失效");
     } finally {
       setLoading(false);
     }
@@ -42,35 +55,23 @@ export default function LoginPage() {
     <div>
       <div className="mb-7">
         <h1 className="text-[1.6rem] font-bold text-zinc-900 tracking-tight leading-tight">
-          歡迎回來
+          重設密碼
         </h1>
-        <p className="text-sm text-zinc-400 mt-1.5">登入以繼續使用知識助理</p>
+        <p className="text-sm text-zinc-400 mt-1.5">設定一個新的密碼以登入</p>
       </div>
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-        {/* Email */}
+        {/* New password */}
         <div className="flex flex-col gap-1.5">
-          <label className="text-xs font-medium text-zinc-600">電子信箱</label>
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-            placeholder="you@company.com"
-            className={inputClass}
-          />
-        </div>
-
-        {/* Password */}
-        <div className="flex flex-col gap-1.5">
-          <label className="text-xs font-medium text-zinc-600">密碼</label>
+          <label className="text-xs font-medium text-zinc-600">新密碼</label>
           <div className="relative">
             <input
               type={showPwd ? "text" : "password"}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              placeholder="••••••••"
+              minLength={8}
+              placeholder="至少 8 個字元"
               className={`${inputClass} pr-10`}
             />
             <button
@@ -82,17 +83,32 @@ export default function LoginPage() {
               {showPwd ? <EyeOff size={15} /> : <Eye size={15} />}
             </button>
           </div>
-          <div className="flex justify-end">
-            <Link
-              href="/forgot-password"
-              className="text-xs text-zinc-500 hover:text-zinc-800 transition-colors"
+        </div>
+
+        {/* Confirm */}
+        <div className="flex flex-col gap-1.5">
+          <label className="text-xs font-medium text-zinc-600">確認新密碼</label>
+          <div className="relative">
+            <input
+              type={showConfirm ? "text" : "password"}
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              required
+              minLength={8}
+              placeholder="再次輸入新密碼"
+              className={`${inputClass} pr-10`}
+            />
+            <button
+              type="button"
+              onClick={() => setShowConfirm((v) => !v)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 transition-colors"
+              tabIndex={-1}
             >
-              忘記密碼？
-            </Link>
+              {showConfirm ? <EyeOff size={15} /> : <Eye size={15} />}
+            </button>
           </div>
         </div>
 
-        {/* Error */}
         {error && (
           <div className="flex items-center gap-2 text-xs text-red-600 bg-red-50 border border-red-100 rounded-xl px-3.5 py-2.5">
             <span className="size-1.5 rounded-full bg-red-500 shrink-0" />
@@ -100,26 +116,25 @@ export default function LoginPage() {
           </div>
         )}
 
-        {/* Submit */}
         <button
           type="submit"
-          disabled={loading}
+          disabled={loading || !token}
           className="h-11 rounded-xl bg-zinc-900 hover:bg-zinc-800 active:scale-[0.98] disabled:bg-zinc-300 text-white text-sm font-medium transition-all duration-150 mt-1 flex items-center justify-center gap-2"
         >
           {loading && (
             <span className="size-4 border-2 border-white/40 border-t-white rounded-full animate-spin-fast" />
           )}
-          {loading ? "登入中…" : "登入"}
+          {loading ? "重設中…" : "重設並登入"}
         </button>
       </form>
 
       <p className="mt-6 text-center text-xs text-zinc-400">
-        沒有帳號？{" "}
+        想起密碼了？{" "}
         <Link
-          href="/register"
+          href="/login"
           className="text-zinc-700 font-semibold hover:text-zinc-900 underline underline-offset-2 transition-colors"
         >
-          立即註冊
+          返回登入
         </Link>
       </p>
     </div>
