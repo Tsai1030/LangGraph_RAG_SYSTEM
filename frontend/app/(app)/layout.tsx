@@ -12,7 +12,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const accessToken = useAuthStore((s) => s.accessToken);
   const setUser = useAuthStore((s) => s.setUser);
-  const [ready, setReady] = useState(false);
+  // 已有 token（剛從 /login 過來）→ 直接 ready，避免暗色 loading 閃一下
+  // 沒 token（fresh page load）→ ready=false，等 tryRestoreSession 跑完
+  const [ready, setReady] = useState(!!accessToken);
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -26,24 +28,25 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         }
         // 從 cookie 還原 session（頁面重整或首次進入）→ 固定從歡迎頁開始
         router.replace("/new");
+        setReady(true);
       }
+      // /auth/me 在背景跑，不阻塞 UI（即使失敗 profile section 也會 fallback）
       try {
         const { data } = await api.get<User>("/auth/me");
         setUser(data);
       } catch {
-        // /auth/me 失敗不阻塞 UI；profile section 會 fallback 到佔位
+        // 忽略
       }
-      setReady(true);
     };
     init();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!ready) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: "var(--sidebar-bg)" }}>
+      <div className="min-h-screen flex items-center justify-center bg-dot-grid">
         <div className="flex flex-col items-center gap-3">
-          <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin-custom" />
-          <span className="text-slate-500 text-sm">載入中...</span>
+          <div className="size-8 border-2 border-zinc-300 border-t-zinc-700 rounded-full animate-spin-fast" />
+          <span className="text-zinc-500 text-sm">載入中…</span>
         </div>
       </div>
     );
