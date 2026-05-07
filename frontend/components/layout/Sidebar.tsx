@@ -487,7 +487,7 @@ export default function Sidebar({ collapsed, onToggle, onMobileClose }: Props) {
             )}
           >
             <Shield size={13} className="text-zinc-400" />
-            管理後台
+            Admin Panel
           </button>
         )}
         <button

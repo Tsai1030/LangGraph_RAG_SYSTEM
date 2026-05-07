@@ -153,6 +153,8 @@ async def save_message(
     role: str,
     content: str,
     metadata: dict | None = None,
+    input_tokens: int | None = None,
+    output_tokens: int | None = None,
 ) -> Message:
     """
     寫入一則訊息到資料庫。
@@ -160,13 +162,23 @@ async def save_message(
 
     Args:
         role: 'user' | 'assistant' | 'system'
-        metadata: sources、form_data、token_count 等
+        metadata: sources、form_files 等結構化欄位
+        input_tokens / output_tokens: 該則訊息整輪 LLM call 的 input / output token 累計。
+                                       user 訊息預設不填，舊資料保持 NULL。
+                                       token_count 自動填為 (input + output)。
     """
+    total = None
+    if input_tokens is not None or output_tokens is not None:
+        total = (input_tokens or 0) + (output_tokens or 0)
+
     msg = Message(
         conversation_id=conversation_id,
         role=role,
         content=content,
         meta=metadata,
+        token_count=total,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
     )
     db.add(msg)
 

@@ -25,6 +25,8 @@ from app.schemas.admin import (
     AdminMessageBriefOut,
     AdminMessageOut,
     AdminStatsOut,
+    AdminTimeSeriesOut,
+    AdminTimeSeriesPoint,
     AdminUserListOut,
     AdminUserOut,
     AdminVectorInfo,
@@ -37,8 +39,19 @@ from app.services.email_service import send_password_reset_email
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(get_current_admin)])
 logger = logging.getLogger("app.admin")
 
-# 約略估算成本：gpt-5.4 為假設模型，用 ~$3 / 1M tokens 混合估價
-_USD_PER_1M_TOKENS = 3.0
+# gpt-5.4 標準價（per 1M tokens, USD）。input 與 output 單價差 6 倍，必須分開計算。
+# 來源：https://openai.com/api/pricing/
+# 不含 cache hit 折扣（cached input $0.25/1M）與 long-context 加價，亦不含 embedding 費用。
+_USD_PER_1M_INPUT = 2.50
+_USD_PER_1M_OUTPUT = 15.00
+
+
+def _estimate_cost(input_tokens: int, output_tokens: int) -> float:
+    return round(
+        input_tokens / 1_000_000 * _USD_PER_1M_INPUT
+        + output_tokens / 1_000_000 * _USD_PER_1M_OUTPUT,
+        4,
+    )
 
 
 # ─────────────────────────── Users ───────────────────────────
@@ -286,29 +299,83 @@ async def get_stats(db: AsyncSession = Depends(get_db)):
     today_msg = await count_where(Message, Message.created_at >= today_start)
     week_msg = await count_where(Message, Message.created_at >= week_ago)
 
-    # Tokens
-    total_tokens = (await db.execute(
-        select(func.coalesce(func.sum(Message.token_count), 0))
-    )).scalar_one()
-    today_tokens = (await db.execute(
-        select(func.coalesce(func.sum(Message.token_count), 0))
-        .where(Message.created_at >= today_start)
-    )).scalar_one()
+    # Tokens — 拆 input / output 分別 sum（input 與 output 單價差 6 倍）
+    async def _sum_tokens(*clauses) -> tuple[int, int, int]:
+        q = select(
+            func.coalesce(func.sum(Message.input_tokens), 0),
+            func.coalesce(func.sum(Message.output_tokens), 0),
+            func.coalesce(func.sum(Message.token_count), 0),
+        )
+        for c in clauses:
+            q = q.where(c)
+        row = (await db.execute(q)).one()
+        return int(row[0]), int(row[1]), int(row[2])
 
-    cost_total = round(total_tokens / 1_000_000 * _USD_PER_1M_TOKENS, 2)
-    cost_today = round(today_tokens / 1_000_000 * _USD_PER_1M_TOKENS, 2)
+    in_total, out_total, total_tokens = await _sum_tokens()
+    in_today, out_today, today_tokens = await _sum_tokens(Message.created_at >= today_start)
+
+    cost_total = _estimate_cost(in_total, out_total)
+    cost_today = _estimate_cost(in_today, out_today)
 
     return AdminStatsOut(
         users={"total": total_users, "active": active_users, "admin": admin_users},
         conversations=StatsBreakdown(total=total_conv, today=today_conv, this_week=week_conv),
         messages=StatsBreakdown(total=total_msg, today=today_msg, this_week=week_msg),
-        tokens={"total": int(total_tokens), "today": int(today_tokens)},
+        tokens={"total": total_tokens, "today": today_tokens},
         cost_estimate_usd={"total": cost_total, "today": cost_today},
         note=(
-            "Token / cost 統計僅涵蓋本次 schema 升級後新建的訊息（舊訊息 token_count 為 NULL）。"
-            f"成本估算用 ~${_USD_PER_1M_TOKENS}/1M tokens 平均值，僅供參考。"
+            f"成本估算採 gpt-5.4 標準價：input ${_USD_PER_1M_INPUT}/1M、output ${_USD_PER_1M_OUTPUT}/1M。"
+            "不含 cache hit 折扣、long-context 加價、embedding API 費用。"
+            "舊訊息（schema 升級前）token 欄位為 NULL，不計入。"
         ),
     )
+
+
+@router.get("/stats/timeseries", response_model=AdminTimeSeriesOut)
+async def get_stats_timeseries(
+    days: int = Query(30, ge=1, le=365, description="回看天數（含今日）"),
+    db: AsyncSession = Depends(get_db),
+):
+    """每日彙總（messages / conversations / tokens），以 UTC 日為粒度。
+
+    缺資料的日期會補 0，方便前端直接畫折線圖。
+    """
+    now = datetime.now(timezone.utc)
+    start = (now - timedelta(days=days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    msg_rows = (await db.execute(
+        select(
+            func.date(Message.created_at).label("d"),
+            func.count(Message.id),
+            func.coalesce(func.sum(Message.token_count), 0),
+        )
+        .where(Message.created_at >= start)
+        .group_by(func.date(Message.created_at))
+    )).all()
+    msg_map = {str(r[0]): (int(r[1]), int(r[2])) for r in msg_rows}
+
+    conv_rows = (await db.execute(
+        select(
+            func.date(Conversation.created_at).label("d"),
+            func.count(Conversation.id),
+        )
+        .where(Conversation.created_at >= start)
+        .group_by(func.date(Conversation.created_at))
+    )).all()
+    conv_map = {str(r[0]): int(r[1]) for r in conv_rows}
+
+    points: list[AdminTimeSeriesPoint] = []
+    for i in range(days):
+        d = (start + timedelta(days=i)).date().isoformat()
+        m_count, m_tokens = msg_map.get(d, (0, 0))
+        points.append(AdminTimeSeriesPoint(
+            date=d,
+            messages=m_count,
+            conversations=conv_map.get(d, 0),
+            tokens=m_tokens,
+        ))
+
+    return AdminTimeSeriesOut(days=days, points=points)
 
 
 # ───────────────────────────── Vector ─────────────────────────────

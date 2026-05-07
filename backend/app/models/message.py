@@ -23,13 +23,15 @@ class Message(Base):
     )
     role: Mapped[str] = mapped_column(String(20), nullable=False)  # user | assistant | system
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    # token_count = input_tokens + output_tokens；保留供 timeseries 彙總用
     token_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     meta: Mapped[dict | None] = mapped_column("metadata", JSON, nullable=True)
     # metadata 範例：
     # {
     #   "sources": [{"file": "010101...", "section": "4.5"}],
-    #   "form_data": {"type": "checklist", "rows": [...]},
-    #   "token_count": 1234
+    #   "form_files": [{"form_id": "010101", ...}]
     # }
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, nullable=False

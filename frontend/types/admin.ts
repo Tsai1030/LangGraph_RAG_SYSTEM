@@ -66,3 +66,15 @@ export interface AdminVectorInfo {
   resolved_path: string;
   collections: VectorCollectionInfo[];
 }
+
+export interface AdminTimeSeriesPoint {
+  date: string;
+  messages: number;
+  conversations: number;
+  tokens: number;
+}
+
+export interface AdminTimeSeriesOut {
+  days: number;
+  points: AdminTimeSeriesPoint[];
+}

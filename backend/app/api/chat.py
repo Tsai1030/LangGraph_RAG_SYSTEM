@@ -134,6 +134,10 @@ async def chat_stream(
         assistant_response = ""
         had_error = False
         final_values: dict = {}  # 提前初始化，避免後續 NameError
+        # 整輪所有 LLM call 的 usage 累計（unified_intent / grader / rewriter / responder /
+        # source_filter / summarizer …）。寫進 assistant message 的 token_count 欄位。
+        total_input_tokens = 0
+        total_output_tokens = 0
 
         try:
             try:
@@ -158,6 +162,13 @@ async def chat_stream(
                             yield (
                                 f"data: {json.dumps({'type': 'text', 'content': chunk.content}, ensure_ascii=False)}\n\n"
                             )
+
+                    # 任何 LLM call 結束 → 累計 usage（含串流與非串流）
+                    if event_type == "on_chat_model_end":
+                        msg_out = event.get("data", {}).get("output")
+                        usage = getattr(msg_out, "usage_metadata", None) or {}
+                        total_input_tokens += usage.get("input_tokens", 0) or 0
+                        total_output_tokens += usage.get("output_tokens", 0) or 0
 
             except Exception as exc:
                 had_error = True
@@ -247,6 +258,8 @@ async def chat_stream(
                             "assistant",
                             assistant_response,
                             metadata=meta or None,
+                            input_tokens=total_input_tokens or None,
+                            output_tokens=total_output_tokens or None,
                         )
                 except Exception:
                     pass  # 儲存失敗不影響已完成的串流

@@ -83,3 +83,16 @@ class AdminVectorInfo(BaseModel):
 class AdminMessageBriefOut(BaseModel):
     """admin reset password 回傳訊息"""
     message: str
+
+
+class AdminTimeSeriesPoint(BaseModel):
+    """每日彙總資料點。date 為 UTC 日期 (YYYY-MM-DD)。"""
+    date: str
+    messages: int = 0
+    conversations: int = 0
+    tokens: int = 0
+
+
+class AdminTimeSeriesOut(BaseModel):
+    days: int
+    points: list[AdminTimeSeriesPoint]

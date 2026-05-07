@@ -233,6 +233,7 @@ async def responder(state: GraphState) -> dict:
             api_key=settings.openai_api_key,
             temperature=0,
             streaming=True,
+            stream_usage=True,
         )
         resp = await llm.ainvoke([
             SystemMessage(content=_FILL_DONE_SYSTEM),
@@ -247,6 +248,7 @@ async def responder(state: GraphState) -> dict:
             api_key=settings.openai_api_key,
             temperature=0.3,
             streaming=True,
+            stream_usage=True,
         )
         resp = await llm.ainvoke([
             SystemMessage(content=_FILL_COLLECT_SYSTEM),
@@ -264,6 +266,7 @@ async def responder(state: GraphState) -> dict:
                 api_key=settings.openai_api_key,
                 temperature=0,
                 streaming=True,
+                stream_usage=True,
             )
             resp = await llm.ainvoke([
                 SystemMessage(content=_DYNAMIC_FORM_EXPORT_DONE_SYSTEM),
@@ -280,6 +283,7 @@ async def responder(state: GraphState) -> dict:
             api_key=settings.openai_api_key,
             temperature=0,
             streaming=True,
+            stream_usage=True,
         )
         response = await llm.ainvoke([
             SystemMessage(content=_STATIC_FORM_SYSTEM),
@@ -296,6 +300,7 @@ async def responder(state: GraphState) -> dict:
         api_key=settings.openai_api_key,
         temperature=0.6,
         streaming=True,
+        stream_usage=True,
     )
 
     prompt_messages = _build_messages(state)
