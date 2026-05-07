@@ -5,12 +5,12 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Eye, EyeOff } from "lucide-react";
 import { register } from "@/lib/auth";
+import AuthShell from "@/components/auth/AuthShell";
 
 export default function RegisterPage() {
   const router = useRouter();
   const [form, setForm] = useState({ email: "", password: "", confirm: "", name: "" });
   const [showPwd, setShowPwd] = useState(false);
-  const [showConfirm, setShowConfirm] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -20,7 +20,10 @@ export default function RegisterPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    if (form.password !== form.confirm) { setError("兩次密碼不一致"); return; }
+    if (form.password !== form.confirm) {
+      setError("兩次密碼不一致");
+      return;
+    }
     setLoading(true);
     try {
       await register(form.email, form.password, form.name || undefined);
@@ -37,64 +40,63 @@ export default function RegisterPage() {
     }
   };
 
-  const inputClass =
-    "w-full h-11 rounded-xl border border-zinc-200 bg-zinc-50/60 px-3.5 text-sm text-zinc-900 placeholder-zinc-400 outline-none focus:bg-white focus:border-zinc-400 transition-all duration-150";
-
   return (
-    <div>
-      <div className="mb-7">
-        <h1 className="text-[1.6rem] font-bold text-zinc-900 tracking-tight leading-tight">
-          建立帳號
-        </h1>
-        <p className="text-sm text-zinc-400 mt-1.5">加入公司內部知識助理系統</p>
+    <AuthShell
+      pre="新員工註冊"
+      tagline={<>建立帳號，<br />加入內部<em>知識網絡</em>。</>}
+      sub="建立帳號後即可使用 RAG 智能檢索與動態表單生成功能。"
+      index="N° 02 / Register"
+    >
+      <div className="auth-form__heading-block">
+        <h2 className="auth-form__heading">建立<em>帳號</em>。</h2>
+        <p className="auth-form__sub">使用公司信箱建立內部使用帳號。</p>
       </div>
 
-      <form onSubmit={handleSubmit} className="flex flex-col gap-3.5">
-        {/* Name */}
-        <div className="flex flex-col gap-1.5">
-          <label className="text-xs font-medium text-zinc-600">
-            顯示名稱
-            <span className="text-zinc-400 font-normal ml-1">（選填）</span>
+      <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <div className="auth-field">
+          <label className="auth-field-label">
+            顯示名稱<span className="auth-field-label__opt">（選填）</span>
           </label>
           <input
+            className="auth-input"
             type="text"
             value={form.name}
             onChange={set("name")}
             placeholder="王小明"
-            className={inputClass}
           />
         </div>
 
-        {/* Email */}
-        <div className="flex flex-col gap-1.5">
-          <label className="text-xs font-medium text-zinc-600">電子信箱</label>
+        <div className="auth-field">
+          <label className="auth-field-label">電子信箱</label>
           <input
+            className="auth-input"
             type="email"
             value={form.email}
             onChange={set("email")}
             required
             placeholder="you@company.com"
-            className={inputClass}
           />
         </div>
 
-        {/* Password */}
-        <div className="flex flex-col gap-1.5">
-          <label className="text-xs font-medium text-zinc-600">密碼</label>
-          <div className="relative">
+        <div className="auth-field">
+          <label className="auth-field-label">
+            密碼<span className="auth-field-label__opt">（至少 8 字元）</span>
+          </label>
+          <div className="auth-pwd-wrap">
             <input
+              className="auth-input auth-input--with-eye"
               type={showPwd ? "text" : "password"}
               value={form.password}
               onChange={set("password")}
               required
-              placeholder="至少 8 個字元"
               minLength={8}
-              className={`${inputClass} pr-10`}
+              placeholder="••••••••"
             />
             <button
               type="button"
+              className="auth-pwd-eye"
               onClick={() => setShowPwd((v) => !v)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 transition-colors"
+              aria-label={showPwd ? "隱藏密碼" : "顯示密碼"}
               tabIndex={-1}
             >
               {showPwd ? <EyeOff size={15} /> : <Eye size={15} />}
@@ -102,66 +104,46 @@ export default function RegisterPage() {
           </div>
         </div>
 
-        {/* Confirm password */}
-        <div className="flex flex-col gap-1.5">
-          <label className="text-xs font-medium text-zinc-600">確認密碼</label>
-          <div className="relative">
-            <input
-              type={showConfirm ? "text" : "password"}
-              value={form.confirm}
-              onChange={set("confirm")}
-              required
-              placeholder="再次輸入密碼"
-              className={`${inputClass} pr-10`}
-            />
-            <button
-              type="button"
-              onClick={() => setShowConfirm((v) => !v)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 transition-colors"
-              tabIndex={-1}
-            >
-              {showConfirm ? <EyeOff size={15} /> : <Eye size={15} />}
-            </button>
-          </div>
+        <div className="auth-field">
+          <label className="auth-field-label">確認密碼</label>
+          <input
+            className="auth-input"
+            type={showPwd ? "text" : "password"}
+            value={form.confirm}
+            onChange={set("confirm")}
+            required
+            placeholder="再次輸入"
+          />
         </div>
 
-        {/* Error */}
         {error && (
-          <div className="flex items-center gap-2 text-xs text-red-600 bg-red-50 border border-red-100 rounded-xl px-3.5 py-2.5">
-            <span className="size-1.5 rounded-full bg-red-500 shrink-0" />
+          <div className="auth-err">
+            <span className="auth-err__dot" />
             {error}
           </div>
         )}
 
-        {/* Submit */}
         <button
           type="submit"
           disabled={loading}
-          className="h-11 rounded-xl bg-zinc-900 hover:bg-zinc-800 active:scale-[0.98] disabled:bg-zinc-300 text-white text-sm font-medium transition-all duration-150 mt-1 flex items-center justify-center gap-2"
+          className="auth-btn-ink"
+          style={{ marginTop: 4 }}
         >
-          {loading && (
-            <span className="size-4 border-2 border-white/40 border-t-white rounded-full animate-spin-fast" />
-          )}
-          {loading ? "建立中…" : "建立帳號"}
+          {loading && <span className="auth-spinner" />}
+          {loading ? "建立中…" : <>建立帳號 <span className="auth-btn-ink__arrow">→</span></>}
         </button>
 
-        {/* 隱私聲明 — admin 可查閱對話紀錄 */}
-        <p className="text-[11px] leading-relaxed text-zinc-400 text-center">
-          建立帳號即表示同意：為提供服務品質支援與系統管理，
-          <br className="hidden sm:block" />
-          管理員可能查閱您於本系統的對話紀錄。
+        <p className="auth-form__caveat">
+          建立帳號即同意：管理員可查閱您於本系統的對話紀錄。
+        </p>
+
+        <p className="auth-form__hint">
+          已有帳號？
+          <Link href="/login" className="auth-meta-link auth-meta-link--strong" style={{ marginLeft: 4 }}>
+            立即登入
+          </Link>
         </p>
       </form>
-
-      <p className="mt-6 text-center text-xs text-zinc-400">
-        已有帳號？{" "}
-        <Link
-          href="/login"
-          className="text-zinc-700 font-semibold hover:text-zinc-900 underline underline-offset-2 transition-colors"
-        >
-          立即登入
-        </Link>
-      </p>
-    </div>
+    </AuthShell>
   );
 }

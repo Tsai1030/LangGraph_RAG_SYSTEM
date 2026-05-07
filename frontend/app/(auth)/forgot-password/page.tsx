@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { forgotPassword } from "@/lib/auth";
+import AuthShell from "@/components/auth/AuthShell";
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
@@ -22,77 +23,82 @@ export default function ForgotPasswordPage() {
     }
   };
 
-  const inputClass =
-    "w-full h-11 rounded-xl border border-zinc-200 bg-zinc-50/60 px-3.5 text-sm text-zinc-900 placeholder-zinc-400 outline-none focus:bg-white focus:border-zinc-400 transition-all duration-150";
-
-  if (submitted) {
-    return (
-      <div>
-        <div className="mb-7">
-          <h1 className="text-[1.6rem] font-bold text-zinc-900 tracking-tight leading-tight">
-            請查看您的信箱
-          </h1>
-          <p className="text-sm text-zinc-500 mt-1.5 leading-relaxed">
-            若 <span className="text-zinc-700 font-medium">{email}</span> 是已註冊的帳號，您將在數分鐘內收到一封含密碼重設連結的信件。
-          </p>
-          <p className="text-xs text-zinc-400 mt-3 leading-relaxed">
-            連結一小時內有效。沒收到？檢查垃圾信件夾，或稍候再試一次。
-          </p>
-        </div>
-
-        <Link
-          href="/login"
-          className="block w-full h-11 rounded-xl border border-zinc-300 bg-white text-center leading-[2.75rem] text-sm font-medium text-zinc-900 hover:bg-zinc-50 transition-colors"
-        >
-          返回登入
-        </Link>
-      </div>
-    );
-  }
-
   return (
-    <div>
-      <div className="mb-7">
-        <h1 className="text-[1.6rem] font-bold text-zinc-900 tracking-tight leading-tight">
-          忘記密碼
-        </h1>
-        <p className="text-sm text-zinc-400 mt-1.5">輸入您的電子信箱，我們會寄重設連結給您</p>
-      </div>
+    <AuthShell
+      pre="密碼重設"
+      tagline={<>沒事，<br />我們<em>協助您</em>重設。</>}
+      sub="輸入公司信箱，我們會寄送一封含重設連結的信件。"
+      index="N° 03 / Recover"
+    >
+      {submitted ? (
+        <>
+          <div className="auth-form__heading-block">
+            <h2 className="auth-form__heading">請<em>查看信箱</em>。</h2>
+            <p className="auth-form__sub" style={{ marginTop: 4 }}>
+              若 <span style={{ color: "var(--auth-ink)", fontWeight: 500 }}>{email}</span>{" "}
+              是已註冊的帳號，您將在數分鐘內收到一封含密碼重設連結的信件。
+            </p>
+            <p className="auth-form__caveat" style={{ textAlign: "left", marginTop: 8 }}>
+              連結一小時內有效。沒收到請檢查垃圾信件夾。
+            </p>
+          </div>
+          <Link
+            href="/login"
+            className="auth-btn-ink"
+            style={{
+              marginTop: 4,
+              background: "white",
+              color: "var(--auth-ink)",
+              border: "1px solid var(--auth-line)",
+              textDecoration: "none",
+            }}
+          >
+            返回登入
+          </Link>
+        </>
+      ) : (
+        <>
+          <div className="auth-form__heading-block">
+            <h2 className="auth-form__heading">重設<em>密碼</em>。</h2>
+            <p className="auth-form__sub">輸入信箱，我們會寄重設連結給您。</p>
+          </div>
 
-      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-        <div className="flex flex-col gap-1.5">
-          <label className="text-xs font-medium text-zinc-600">電子信箱</label>
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-            placeholder="you@company.com"
-            className={inputClass}
-          />
-        </div>
+          <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <div className="auth-field">
+              <label className="auth-field-label">電子信箱</label>
+              <input
+                className="auth-input"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                placeholder="you@company.com"
+              />
+            </div>
 
-        <button
-          type="submit"
-          disabled={loading || !email}
-          className="h-11 rounded-xl bg-zinc-900 hover:bg-zinc-800 active:scale-[0.98] disabled:bg-zinc-300 text-white text-sm font-medium transition-all duration-150 mt-1 flex items-center justify-center gap-2"
-        >
-          {loading && (
-            <span className="size-4 border-2 border-white/40 border-t-white rounded-full animate-spin-fast" />
-          )}
-          {loading ? "寄送中…" : "寄送重設連結"}
-        </button>
-      </form>
+            <button
+              type="submit"
+              disabled={loading || !email}
+              className="auth-btn-ink"
+              style={{ marginTop: 4 }}
+            >
+              {loading && <span className="auth-spinner" />}
+              {loading ? "寄送中…" : <>寄送重設連結 <span className="auth-btn-ink__arrow">→</span></>}
+            </button>
 
-      <p className="mt-6 text-center text-xs text-zinc-400">
-        想起密碼了？{" "}
-        <Link
-          href="/login"
-          className="text-zinc-700 font-semibold hover:text-zinc-900 underline underline-offset-2 transition-colors"
-        >
-          返回登入
-        </Link>
-      </p>
-    </div>
+            <p className="auth-form__caveat">
+              連結一小時內有效。沒收到請檢查垃圾信件夾。
+            </p>
+
+            <p className="auth-form__hint">
+              想起密碼了？
+              <Link href="/login" className="auth-meta-link auth-meta-link--strong" style={{ marginLeft: 4 }}>
+                返回登入
+              </Link>
+            </p>
+          </form>
+        </>
+      )}
+    </AuthShell>
   );
 }

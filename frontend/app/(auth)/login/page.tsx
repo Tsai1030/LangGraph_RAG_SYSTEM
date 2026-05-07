@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Eye, EyeOff } from "lucide-react";
 import { login } from "@/lib/auth";
+import AuthShell from "@/components/auth/AuthShell";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -35,93 +36,83 @@ export default function LoginPage() {
     }
   };
 
-  const inputClass =
-    "w-full h-11 rounded-xl border border-zinc-200 bg-zinc-50/60 px-3.5 text-sm text-zinc-900 placeholder-zinc-400 outline-none focus:bg-white focus:border-zinc-400 transition-all duration-150";
-
   return (
-    <div>
-      <div className="mb-7">
-        <h1 className="text-[1.6rem] font-bold text-zinc-900 tracking-tight leading-tight">
-          歡迎回來
-        </h1>
-        <p className="text-sm text-zinc-400 mt-1.5">登入以繼續使用知識助理</p>
+    <AuthShell
+      pre="Internal Knowledge AI"
+      tagline={<>把每一份規範，<br />變成可以<em>對話</em>的知識。</>}
+      sub="公司內部 RAG 知識助理 — 規範、流程、表單作業，都在對話裡完成。"
+      index="N° 01 / Sign in"
+    >
+      <div className="auth-form__heading-block">
+        <h2 className="auth-form__heading">歡迎<em>回來</em>。</h2>
+        <p className="auth-form__sub">請使用公司信箱登入。</p>
       </div>
 
-      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-        {/* Email */}
-        <div className="flex flex-col gap-1.5">
-          <label className="text-xs font-medium text-zinc-600">電子信箱</label>
+      <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <div className="auth-field">
+          <label className="auth-field-label">電子信箱</label>
           <input
+            className="auth-input"
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
             placeholder="you@company.com"
-            className={inputClass}
           />
         </div>
 
-        {/* Password */}
-        <div className="flex flex-col gap-1.5">
-          <label className="text-xs font-medium text-zinc-600">密碼</label>
-          <div className="relative">
+        <div className="auth-field">
+          <label className="auth-field-label">密碼</label>
+          <div className="auth-pwd-wrap">
             <input
+              className="auth-input auth-input--with-eye"
               type={showPwd ? "text" : "password"}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
               placeholder="••••••••"
-              className={`${inputClass} pr-10`}
             />
             <button
               type="button"
+              className="auth-pwd-eye"
               onClick={() => setShowPwd((v) => !v)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 transition-colors"
+              aria-label={showPwd ? "隱藏密碼" : "顯示密碼"}
               tabIndex={-1}
             >
               {showPwd ? <EyeOff size={15} /> : <Eye size={15} />}
             </button>
           </div>
-          <div className="flex justify-end">
-            <Link
-              href="/forgot-password"
-              className="text-xs text-zinc-500 hover:text-zinc-800 transition-colors"
-            >
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 2, fontSize: 11.5 }}>
+            <Link href="/forgot-password" className="auth-meta-link">
               忘記密碼？
             </Link>
           </div>
         </div>
 
-        {/* Error */}
         {error && (
-          <div className="flex items-center gap-2 text-xs text-red-600 bg-red-50 border border-red-100 rounded-xl px-3.5 py-2.5">
-            <span className="size-1.5 rounded-full bg-red-500 shrink-0" />
+          <div className="auth-err">
+            <span className="auth-err__dot" />
             {error}
           </div>
         )}
 
-        {/* Submit */}
         <button
           type="submit"
           disabled={loading}
-          className="h-11 rounded-xl bg-zinc-900 hover:bg-zinc-800 active:scale-[0.98] disabled:bg-zinc-300 text-white text-sm font-medium transition-all duration-150 mt-1 flex items-center justify-center gap-2"
+          className="auth-btn-ink"
+          style={{ marginTop: 4 }}
         >
-          {loading && (
-            <span className="size-4 border-2 border-white/40 border-t-white rounded-full animate-spin-fast" />
-          )}
-          {loading ? "登入中…" : "登入"}
+          {loading && <span className="auth-spinner" />}
+          {loading ? "登入中…" : <>登入 <span className="auth-btn-ink__arrow">→</span></>}
         </button>
-      </form>
 
-      <p className="mt-6 text-center text-xs text-zinc-400">
-        沒有帳號？{" "}
-        <Link
-          href="/register"
-          className="text-zinc-700 font-semibold hover:text-zinc-900 underline underline-offset-2 transition-colors"
-        >
-          立即註冊
-        </Link>
-      </p>
-    </div>
+        <p className="auth-form__hint">
+          沒有帳號？
+          <Link href="/register" className="auth-meta-link auth-meta-link--strong" style={{ marginLeft: 4 }}>
+            立即註冊
+          </Link>
+        </p>
+      </form>
+    </AuthShell>
   );
 }

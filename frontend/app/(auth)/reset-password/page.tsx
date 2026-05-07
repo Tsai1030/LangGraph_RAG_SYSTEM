@@ -5,10 +5,22 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Eye, EyeOff } from "lucide-react";
 import { resetPassword } from "@/lib/auth";
+import AuthShell from "@/components/auth/AuthShell";
 
 export default function ResetPasswordPage() {
   return (
-    <Suspense fallback={<div className="text-sm text-zinc-500">載入中…</div>}>
+    <Suspense
+      fallback={
+        <AuthShell
+          pre="設定新密碼"
+          tagline={<>設定<em>新密碼</em>，<br />立即繼續使用。</>}
+          sub="設定一個新密碼，至少 8 個字元。設定後立即登入。"
+          index="N° 04 / Reset"
+        >
+          <p className="auth-form__sub">載入中…</p>
+        </AuthShell>
+      }
+    >
       <ResetPasswordForm />
     </Suspense>
   );
@@ -56,36 +68,38 @@ function ResetPasswordForm() {
     }
   };
 
-  const inputClass =
-    "w-full h-11 rounded-xl border border-zinc-200 bg-zinc-50/60 px-3.5 text-sm text-zinc-900 placeholder-zinc-400 outline-none focus:bg-white focus:border-zinc-400 transition-all duration-150";
-
   return (
-    <div>
-      <div className="mb-7">
-        <h1 className="text-[1.6rem] font-bold text-zinc-900 tracking-tight leading-tight">
-          重設密碼
-        </h1>
-        <p className="text-sm text-zinc-400 mt-1.5">設定一個新的密碼以登入</p>
+    <AuthShell
+      pre="設定新密碼"
+      tagline={<>設定<em>新密碼</em>，<br />立即繼續使用。</>}
+      sub="設定一個新密碼，至少 8 個字元。設定後立即登入。"
+      index="N° 04 / Reset"
+    >
+      <div className="auth-form__heading-block">
+        <h2 className="auth-form__heading">設定<em>新密碼</em>。</h2>
+        <p className="auth-form__sub">設定一組新密碼以登入系統。</p>
       </div>
 
-      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-        {/* New password */}
-        <div className="flex flex-col gap-1.5">
-          <label className="text-xs font-medium text-zinc-600">新密碼</label>
-          <div className="relative">
+      <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <div className="auth-field">
+          <label className="auth-field-label">
+            新密碼<span className="auth-field-label__opt">（至少 8 字元）</span>
+          </label>
+          <div className="auth-pwd-wrap">
             <input
+              className="auth-input auth-input--with-eye"
               type={showPwd ? "text" : "password"}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
               minLength={8}
-              placeholder="至少 8 個字元"
-              className={`${inputClass} pr-10`}
+              placeholder="輸入新密碼"
             />
             <button
               type="button"
+              className="auth-pwd-eye"
               onClick={() => setShowPwd((v) => !v)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 transition-colors"
+              aria-label={showPwd ? "隱藏密碼" : "顯示密碼"}
               tabIndex={-1}
             >
               {showPwd ? <EyeOff size={15} /> : <Eye size={15} />}
@@ -93,23 +107,23 @@ function ResetPasswordForm() {
           </div>
         </div>
 
-        {/* Confirm */}
-        <div className="flex flex-col gap-1.5">
-          <label className="text-xs font-medium text-zinc-600">確認新密碼</label>
-          <div className="relative">
+        <div className="auth-field">
+          <label className="auth-field-label">確認新密碼</label>
+          <div className="auth-pwd-wrap">
             <input
+              className="auth-input auth-input--with-eye"
               type={showConfirm ? "text" : "password"}
               value={confirm}
               onChange={(e) => setConfirm(e.target.value)}
               required
               minLength={8}
               placeholder="再次輸入新密碼"
-              className={`${inputClass} pr-10`}
             />
             <button
               type="button"
+              className="auth-pwd-eye"
               onClick={() => setShowConfirm((v) => !v)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 transition-colors"
+              aria-label={showConfirm ? "隱藏密碼" : "顯示密碼"}
               tabIndex={-1}
             >
               {showConfirm ? <EyeOff size={15} /> : <Eye size={15} />}
@@ -118,8 +132,8 @@ function ResetPasswordForm() {
         </div>
 
         {error && (
-          <div className="flex items-center gap-2 text-xs text-red-600 bg-red-50 border border-red-100 rounded-xl px-3.5 py-2.5">
-            <span className="size-1.5 rounded-full bg-red-500 shrink-0" />
+          <div className="auth-err">
+            <span className="auth-err__dot" />
             {error}
           </div>
         )}
@@ -127,24 +141,20 @@ function ResetPasswordForm() {
         <button
           type="submit"
           disabled={loading || !token}
-          className="h-11 rounded-xl bg-zinc-900 hover:bg-zinc-800 active:scale-[0.98] disabled:bg-zinc-300 text-white text-sm font-medium transition-all duration-150 mt-1 flex items-center justify-center gap-2"
+          className="auth-btn-ink"
+          style={{ marginTop: 4 }}
         >
-          {loading && (
-            <span className="size-4 border-2 border-white/40 border-t-white rounded-full animate-spin-fast" />
-          )}
-          {loading ? "重設中…" : "重設並登入"}
+          {loading && <span className="auth-spinner" />}
+          {loading ? "重設中…" : <>重設並登入 <span className="auth-btn-ink__arrow">→</span></>}
         </button>
-      </form>
 
-      <p className="mt-6 text-center text-xs text-zinc-400">
-        想起密碼了？{" "}
-        <Link
-          href="/login"
-          className="text-zinc-700 font-semibold hover:text-zinc-900 underline underline-offset-2 transition-colors"
-        >
-          返回登入
-        </Link>
-      </p>
-    </div>
+        <p className="auth-form__hint">
+          想起密碼了？
+          <Link href="/login" className="auth-meta-link auth-meta-link--strong" style={{ marginLeft: 4 }}>
+            返回登入
+          </Link>
+        </p>
+      </form>
+    </AuthShell>
   );
 }
