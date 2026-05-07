@@ -197,8 +197,12 @@ async def chat_stream(
                 if intent == "dynamic_form_export" and exported:
                     matched_forms = [exported]
                 # 填表完成 → 把已填寫檔案以 form_files 形式推送（前端共用同一 UI 顯示下載按鈕）
+                # **必須限定 intent=static_form_fill**：session 透過 checkpointer 跨輪持久化，
+                # filled_token 會留在 state 裡，若無 intent gate 後續任何輪（qa / dynamic 等）
+                # 都會誤推「(已填寫)」卡片。
                 elif (
-                    fill_session.get("status") == "completed"
+                    intent == "static_form_fill"
+                    and fill_session.get("status") == "completed"
                     and fill_session.get("filled_token")
                 ):
                     target_id = fill_session.get("target_form_id")

@@ -472,25 +472,26 @@ async def form_template_loader(state: GraphState) -> dict:
     prior_target = session.get("target_form_id")
     prior_status = session.get("status")
 
+    query = state.get("query", "")
     if not session or prior_target != target_id or prior_status == "error":
         new_session = {"target_form_id": target_id, "collected": {}, "status": "collecting"}
         logger.info(
-            "[form_template_loader] new/switch → target=%s (was target=%s status=%s)",
-            target_id, prior_target, prior_status,
+            "[form_template_loader] new/switch → target=%s (was target=%s status=%s) | query=%r",
+            target_id, prior_target, prior_status, query,
         )
     elif prior_status == "completed":
         new_session = {**session, "status": "collecting"}
         new_session.pop("filled_token", None)
         new_session.pop("filled_field_count", None)
         logger.info(
-            "[form_template_loader] resume completed for edit → target=%s, %d fields preserved",
-            target_id, len(new_session.get("collected", {})),
+            "[form_template_loader] resume completed for edit → target=%s, %d fields preserved | query=%r",
+            target_id, len(new_session.get("collected", {})), query,
         )
     else:
         new_session = session
         logger.info(
-            "[form_template_loader] continue collecting → target=%s, %d fields collected",
-            target_id, len(session.get("collected", {})),
+            "[form_template_loader] continue collecting → target=%s, %d fields collected | query=%r",
+            target_id, len(session.get("collected", {})), query,
         )
 
     return {"form_fill_session": new_session}
@@ -546,10 +547,10 @@ async def form_fill_collector(state: GraphState) -> dict:
 
     logger.info(
         "[form_fill_collector] form=%s extracted=%d ghost=%d bulk=%d auto=%d skipped=%d "
-        "collected=%d user_done=%s auto_test=%s skip=%s → status=%s",
+        "collected=%d user_done=%s auto_test=%s skip=%s → status=%s | query=%r | reason=%r",
         target_id, len(extracted_keys), len(ghost_keys), n_bulk, n_auto, len(skipped_groups),
         len(collected), extraction.user_done, extraction.auto_fill_test,
-        extraction.skip_current_group, status,
+        extraction.skip_current_group, status, state.get("query", ""), extraction.reason,
     )
     return {"form_fill_session": new_session}
 

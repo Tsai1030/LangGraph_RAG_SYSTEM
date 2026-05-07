@@ -171,22 +171,27 @@ reason 用 30 字內中文說明依據。"""
 # Pure helpers — 純函式，無副作用，易單元測試
 # ──────────────────────────────────────────────────────────────────
 
-def _resolve_candidates(query: str, recent_messages: list) -> list[dict]:
-    """候選靜態表 = 先用本輪 query 比對；命不中時 fallback 拼接最近對話再比對一次。
+def _resolve_candidates(query: str, recent_messages: list) -> tuple[list[dict], bool]:
+    """候選靜態表查找。回傳 (candidates, from_history)。
 
-    解決使用者第二輪只說「我想要填入資訊」（無表名）時，能延續上一輪提到的表單。
+    - 先用本輪 query 直接比對 → from_history=False
+    - 命不中時 fallback 拼接最近對話再比對 → from_history=True
+      （讓使用者第二輪說「我想要填入資訊」無表名時仍能延續上一輪表單）
+
+    呼叫端可依 from_history 決定要不要在 qa 路徑帶上候選表（避免 qa 結尾因歷史
+    殘留的舊表名而黏「可下載 X 表」提示）。
     """
     direct = lookup_forms(query)
     if direct:
-        return direct
+        return direct, False
     if not recent_messages:
-        return []
+        return [], False
     history_text = " ".join(
         m.content[:_HISTORY_MSG_CHARS]
         for m in recent_messages
         if hasattr(m, "content") and isinstance(m.content, str)
     )
-    return lookup_forms(history_text) if history_text else []
+    return (lookup_forms(history_text) if history_text else []), True
 
 
 def _resolve_form_meta(form_id: str, candidates: list[dict]) -> dict:
@@ -298,8 +303,14 @@ def _build_state_update(
     target_id: Optional[str],
     decision: IntentDecision,
     candidates: list[dict],
+    candidates_from_history: bool,
 ) -> dict:
-    """根據規範化後的 (intent, target_id) 產生要回給 graph 的 state 變更 dict。"""
+    """根據規範化後的 (intent, target_id) 產生要回給 graph 的 state 變更 dict。
+
+    candidates_from_history=True 代表這批候選是「query 沒命中、從最近對話歷史拼接後再 match」
+    得出的。對 static_form_* 仍有用（讓使用者無表名指代時能續用），但 qa 不能帶（會造成
+    「鋼筋規範」也黏「動員開工檢核表」的下載提示）。
+    """
     result: dict = {
         "intent": intent,
         "need_retrieval": decision.need_retrieval,
@@ -317,8 +328,9 @@ def _build_state_update(
         result["form_explicit"] = True
         result["need_retrieval"] = False
     elif intent == "qa":
-        # qa 仍把候選表帶下去，讓 responder 在回答末尾附下載連結
-        result["matched_forms"] = candidates
+        # qa 只認 query 直接命中的靜態表（讓 responder 在結尾附下載連結）；
+        # history fallback 命中的候選不帶 — 避免問新主題時前輪表單一直黏在回覆結尾
+        result["matched_forms"] = [] if candidates_from_history else candidates
     elif intent == "dynamic_form_generate":
         result["need_retrieval"] = True
     elif intent == "form_continuation":
@@ -366,7 +378,14 @@ async def _llm_classify(
 # ──────────────────────────────────────────────────────────────────
 
 async def unified_intent(state: GraphState) -> dict:
-    """主流程：每輪都跑 LLM 分類 → 規範化 → 組 state 變更。"""
+    """主流程：每輪都跑 LLM 分類 → 規範化 → 組 state 變更。
+
+    debug 用 log（grep [unified_intent]）：
+      1. INPUT  — 收到的 query / candidates / fill_session / prev_form
+      2. LLM    — 模型原始輸出 (intent, target, reason, retrieval_topic, export_format)
+      3. STATE  — 規範化後的 state 變更（含 matched_forms 內容）
+      若規範化覆寫 intent，會額外印 OVERRIDE 警告。
+    """
     query = state["query"]
 
     messages = state.get("messages", [])
@@ -375,19 +394,51 @@ async def unified_intent(state: GraphState) -> dict:
     prev_form_data = state.get("prev_form_data")
     fill_session = state.get("form_fill_session") or {}
 
-    candidates = _resolve_candidates(query, recent)
+    candidates, candidates_from_history = _resolve_candidates(query, recent)
+
+    logger.info(
+        "[unified_intent] INPUT | query=%r | candidates=%s (from_history=%s) | prev_form=%s | "
+        "fill_session={status=%s target=%s collected=%d skipped=%d} | history_msgs=%d",
+        query,
+        [c["form_id"] for c in candidates],
+        candidates_from_history,
+        (prev_form_data or {}).get("title"),
+        fill_session.get("status"),
+        fill_session.get("target_form_id"),
+        len(fill_session.get("collected", {})),
+        len(fill_session.get("skipped_groups", [])),
+        len(recent),
+    )
 
     # LLM 分類（每輪都打；不再用「首輪→qa」fast-path 因為首輪可能是動態表單請求）
     decision = await _llm_classify(query, candidates, prev_form_data, fill_session, recent)
+
+    logger.info(
+        "[unified_intent] LLM | intent=%s target=%s need_retr=%s | "
+        "retrieval_topic=%r export_format=%s | reason=%r",
+        decision.intent, decision.target_form_id, decision.need_retrieval,
+        decision.retrieval_topic, decision.export_format, decision.reason,
+    )
 
     # 規範化（防 LLM 越界）
     intent, target_id = _normalize_decision(
         decision, candidates, fill_session, prev_form_data,
     )
 
-    logger.info(
-        "[unified_intent] intent=%s target=%s need_retrieval=%s reason=%r",
-        intent, target_id, decision.need_retrieval, decision.reason,
-    )
+    if intent != decision.intent or target_id != decision.target_form_id:
+        logger.warning(
+            "[unified_intent] OVERRIDE | intent %s→%s | target %s→%s",
+            decision.intent, intent, decision.target_form_id, target_id,
+        )
 
-    return _build_state_update(intent, target_id, decision, candidates)
+    update = _build_state_update(intent, target_id, decision, candidates, candidates_from_history)
+    logger.info(
+        "[unified_intent] STATE | intent=%s | matched_forms=%s | form_explicit=%s | "
+        "need_retrieval=%s | is_form_continuation=%s",
+        update["intent"],
+        [m.get("form_id") for m in update.get("matched_forms", [])],
+        update.get("form_explicit"),
+        update.get("need_retrieval"),
+        update.get("is_form_continuation"),
+    )
+    return update
