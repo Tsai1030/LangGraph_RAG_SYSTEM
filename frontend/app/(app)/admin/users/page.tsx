@@ -153,13 +153,13 @@ export default function AdminUsersPage() {
                       <span className="text-xs text-zinc-500">user</span>
                     )}
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-4 py-3 whitespace-nowrap">
                     {u.is_active ? (
-                      <span className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md">
+                      <span className="inline-block whitespace-nowrap text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md">
                         啟用中
                       </span>
                     ) : (
-                      <span className="text-xs text-zinc-500 bg-zinc-100 px-2 py-0.5 rounded-md">
+                      <span className="inline-block whitespace-nowrap text-xs text-zinc-500 bg-zinc-100 px-2 py-0.5 rounded-md">
                         已停用
                       </span>
                     )}

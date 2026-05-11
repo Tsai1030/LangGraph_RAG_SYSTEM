@@ -45,7 +45,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     <div className="flex-1 flex flex-col overflow-hidden">
       {/* Header */}
       <header className="shrink-0 border-b border-zinc-200 bg-white">
-        <div className="px-6 py-3 flex items-center gap-4">
+        <div className="pl-14 pr-4 py-3 md:px-6 flex items-center gap-4">
           <Link
             href="/new"
             className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-900 transition-colors"
