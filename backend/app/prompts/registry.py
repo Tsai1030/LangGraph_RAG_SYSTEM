@@ -34,8 +34,7 @@ _ACTIVE: dict[str, str] = {
     "responder.fill_collect": "responder.fill_collect_v1",
     "responder.fill_done":   "responder.fill_done_v1",
     "responder.export_done": "responder.dynamic_export_done_v1",
-    # 後續節點搬遷時會逐步補上：
-    # "intent":                 "intent.v1",
+    "intent":                "intent.v1",
 }
 
 _CACHE: dict[str, str] = {}
