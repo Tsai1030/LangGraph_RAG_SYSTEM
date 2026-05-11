@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.graph.state import GraphState
+from app.prompts import get_prompt
 from app.rag.retriever import format_sources
 
 logger = logging.getLogger(__name__)
@@ -25,11 +26,6 @@ class SourceFilterOutput(BaseModel):
     relevant_indices: List[int] = Field(
         description="對回答問題有實質貢獻的 chunk 索引（從 0 開始）"
     )
-
-
-_SYSTEM_PROMPT = """\
-你是來源評估助理。根據問題與文件片段，列出真正能回答此問題的 chunk 索引。
-只列出有實質貢獻的索引，不相關的不要列入。"""
 
 
 async def source_filter(state: GraphState) -> dict:
@@ -66,7 +62,7 @@ async def source_filter(state: GraphState) -> dict:
     ).with_structured_output(SourceFilterOutput)
 
     result: SourceFilterOutput = await llm.ainvoke([
-        SystemMessage(content=_SYSTEM_PROMPT),
+        SystemMessage(content=get_prompt("source_filter")),
         HumanMessage(content=f"問題：{query}\n\n文件片段：\n{chunks_text}"),
     ])
 

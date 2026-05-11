@@ -18,23 +18,9 @@ from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.graph.state import GraphState
+from app.prompts import get_prompt
 
 _FORM_CONTEXT_LIMIT = 3000
-
-_FORM_SYSTEM_PROMPT = """\
-你是一位專業的營造業文件專家。
-根據使用者需求與參考文件，生成一份結構化表單。
-
-form_type 選用原則：
-- checklist：作業檢核表（最常見，逐項勾核用途）
-- report：報告書（填寫數據、記錄結果）
-- plan：計畫書（規劃步驟、時程安排）
-- table：一般資料表格（彙整資訊）
-
-rows 格式說明：
-- 每列為一個字串，各欄位值依 columns 順序以 | 分隔
-- 例如 columns=["項目", "說明", "狀態"]，則某列為 "安全帽佩戴|施工中必須佩戴|□"
-- 每列的欄位數量必須與 columns 數量相同"""
 
 
 class FormSchema(BaseModel):
@@ -103,7 +89,7 @@ async def form_structurer(state: GraphState) -> dict:
 
     try:
         result: FormSchema = await llm.ainvoke([
-            SystemMessage(content=_FORM_SYSTEM_PROMPT),
+            SystemMessage(content=get_prompt("form_structurer")),
             HumanMessage(content=user_content),
         ])
 

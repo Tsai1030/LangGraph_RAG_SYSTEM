@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.graph.state import GraphState
+from app.prompts import get_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -27,48 +28,6 @@ class GraderOutput(BaseModel):
         default="",
         description="缺少的資訊描述（decision=insufficient 時填寫，sufficient 時留空）",
     )
-
-
-_GRADER_SYSTEM = """\
-你是一位營造業知識庫的檢索品質評估員。
-根據問題類型，套用對應的判斷標準，決定文件是否足以回答。
-
-【第一步：判斷問題類型】
-A. 枚舉型：包含「有幾種/幾級/幾類/有哪些/列出」
-B. 流程型：包含「流程/步驟/如何辦理/怎麼做」
-C. 定義/說明型：包含「是什麼/定義/規定/說明/標準」
-
-【第二步：套用對應標準】
-A. 枚舉型 → sufficient 條件：文件明確列出全部項目或提供總數；若只列出部分而無總數，判 insufficient
-B. 流程型 → sufficient 條件：文件涵蓋該流程的主要步驟；細節不完整但主軸清楚可判 sufficient
-C. 定義/說明型 → sufficient 條件：文件有直接的說明或數字；主題相關但無直接答案判 insufficient
-
-【共通 insufficient 條件】
-- 文件主題與問題完全不相關
-
-判 insufficient 時，請在 missing_information 欄位具體說明缺少哪類資訊（例如「缺少採購金額分級的完整列表」）。"""
-
-_REWRITER_SYSTEM = """\
-你是營造業知識庫的查詢改寫助理。
-將使用者的問題改寫為適合搜尋工程規範文件的「關鍵字查詢」。
-
-改寫原則：
-1. 去除問句語氣詞（有幾種、是什麼、如何、怎麼、哪些、幾個、多少等）
-2. 保留問題的核心主題詞，並根據主題的語境補充正式的修飾語
-   - 若主題涉及金額、費用、預算 → 補充金額相關修飾詞
-   - 若主題涉及分類、等級、種類 → 補充分類依據（標準、條件等）
-   - 若主題涉及作業流程 → 補充流程的執行主體或適用範圍
-3. 輸出 4–10 個字的名詞短語，不要輸出完整句子
-4. 以工程規範文件最可能使用的正式術語輸出，避免口語化
-
-【無主題逃生口】
-若原始問題屬於下列情況，請**原樣輸出原始問題字串**，不要編造關鍵字、不要輸出「未明」
-「無主題」「無法判斷」「不確定」之類的描述性文字：
-- 寒暄／招呼語（hi、hello、你好、嗨、哈囉、早安、謝謝、感謝、ok、好）
-- 過短且無實質主題（少於 3 字且非工程術語）
-- 明顯與營造／工程規範無關的閒聊
-
-只輸出改寫後的查詢字串（或原樣回傳的原始問題），不要輸出其他內容。"""
 
 
 # rewriter 失敗訊號：LLM 放棄改寫時常見的描述性詞彙；命中即視為改寫失敗，fallback 回原 query
@@ -110,7 +69,7 @@ async def retrieval_grader(state: GraphState) -> dict:
     ).with_structured_output(GraderOutput)
 
     result: GraderOutput = await llm.ainvoke([
-        SystemMessage(content=_GRADER_SYSTEM),
+        SystemMessage(content=get_prompt("grader")),
         HumanMessage(content=f"問題：{query}\n\n參考文件片段（每份取前300字）：\n{grader_context}"),
     ])
 
@@ -146,7 +105,7 @@ async def query_rewriter(state: GraphState) -> dict:
 
     llm = ChatOpenAI(model=settings.grader_model, api_key=settings.openai_api_key, temperature=0)
     result = await llm.ainvoke([
-        SystemMessage(content=_REWRITER_SYSTEM),
+        SystemMessage(content=get_prompt("rewriter")),
         HumanMessage(content=human_content),
     ])
 

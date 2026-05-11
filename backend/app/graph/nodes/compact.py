@@ -19,21 +19,13 @@ from langchain_openai import ChatOpenAI
 
 from app.config import settings
 from app.graph.state import GraphState
+from app.prompts import get_prompt
 
 # compact 觸發閾值（tokens）
 COMPACT_THRESHOLD = 8000
 
 # 保留最近幾則訊息（4 輪對話 = 8 則）
 KEEP_RECENT = 8
-
-_SUMMARIZE_PROMPT = """\
-你是對話記錄整理員。請將以下對話記錄濃縮成一段清晰的前情提要（繁體中文，300 字以內），
-保留所有重要的問答內容與關鍵資訊，供後續回答時參考使用。
-
-對話記錄：
-{history}
-
-請輸出前情提要："""
 
 
 def _count_tokens(messages: list[BaseMessage]) -> int:
@@ -105,7 +97,7 @@ async def summarizer(state: GraphState) -> dict:
         temperature=0,
     )
     summary_response = await llm.ainvoke([
-        HumanMessage(content=_SUMMARIZE_PROMPT.format(history=history_text))
+        HumanMessage(content=get_prompt("compact").format(history=history_text))
     ])
     summary_text: str = summary_response.content
 
