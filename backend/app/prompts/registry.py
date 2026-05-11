@@ -23,14 +23,14 @@ from importlib import import_module
 # ────────────────────────────────────────────────────────────────
 # 注意：此 dict 在 Step 2 暫時為空，Step 3 逐節點搬遷時逐一填入。
 _ACTIVE: dict[str, str] = {
-    # 例：
+    "compact": "compact.summarize_v1",
+    # 後續節點搬遷時會逐步補上：
     # "intent":                 "intent.v1",
     # "responder.qa":           "responder.qa_v1",
     # "responder.static":       "responder.static_download_v1",
     # "responder.fill_collect": "responder.fill_collect_v1",
     # "responder.fill_done":    "responder.fill_done_v1",
     # "responder.export_done":  "responder.dynamic_export_done_v1",
-    # "compact":                "compact.summarize_v1",
     # "grader":                 "grader.grade_v1",
     # "rewriter":               "grader.rewriter_v1",
     # "source_filter":          "source_filter.v1",
