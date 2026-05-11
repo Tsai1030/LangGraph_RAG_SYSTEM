@@ -25,8 +25,9 @@ from importlib import import_module
 _ACTIVE: dict[str, str] = {
     "compact":       "compact.summarize_v1",
     "source_filter": "source_filter.v1",
-    "grader":        "grader.grade_v1",
-    "rewriter":      "grader.rewriter_v1",
+    "grader":           "grader.grade_v1",
+    "rewriter":         "grader.rewriter_v1",
+    "form_structurer":  "form_structurer.v1",
     # 後續節點搬遷時會逐步補上：
     # "intent":                 "intent.v1",
     # "responder.qa":           "responder.qa_v1",
@@ -34,7 +35,6 @@ _ACTIVE: dict[str, str] = {
     # "responder.fill_collect": "responder.fill_collect_v1",
     # "responder.fill_done":    "responder.fill_done_v1",
     # "responder.export_done":  "responder.dynamic_export_done_v1",
-    # "form_structurer":        "form_structurer.v1",
     # "form_fill.ghost_write":  "form_fill.ghost_write_v1",
 }
 
