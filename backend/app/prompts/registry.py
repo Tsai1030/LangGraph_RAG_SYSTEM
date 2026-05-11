@@ -23,7 +23,8 @@ from importlib import import_module
 # ────────────────────────────────────────────────────────────────
 # 注意：此 dict 在 Step 2 暫時為空，Step 3 逐節點搬遷時逐一填入。
 _ACTIVE: dict[str, str] = {
-    "compact": "compact.summarize_v1",
+    "compact":       "compact.summarize_v1",
+    "source_filter": "source_filter.v1",
     # 後續節點搬遷時會逐步補上：
     # "intent":                 "intent.v1",
     # "responder.qa":           "responder.qa_v1",
@@ -33,7 +34,6 @@ _ACTIVE: dict[str, str] = {
     # "responder.export_done":  "responder.dynamic_export_done_v1",
     # "grader":                 "grader.grade_v1",
     # "rewriter":               "grader.rewriter_v1",
-    # "source_filter":          "source_filter.v1",
     # "form_structurer":        "form_structurer.v1",
     # "form_fill.ghost_write":  "form_fill.ghost_write_v1",
 }
