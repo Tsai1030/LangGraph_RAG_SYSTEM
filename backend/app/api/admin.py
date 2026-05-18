@@ -32,6 +32,7 @@ from app.schemas.admin import (
     AdminVectorInfo,
     StatsBreakdown,
     ToggleActiveRequest,
+    ToggleSearchPermissionRequest,
     VectorCollectionInfo,
 )
 from app.services.email_service import send_password_reset_email
@@ -108,6 +109,7 @@ async def list_users(
             display_name=u.display_name,
             role=u.role,
             is_active=u.is_active,
+            search_enabled=u.search_enabled,
             created_at=u.created_at,
             updated_at=u.updated_at,
             conversation_count=conv_counts.get(u.id, 0),
@@ -140,6 +142,7 @@ async def get_user(user_id: str, db: AsyncSession = Depends(get_db)):
         display_name=user.display_name,
         role=user.role,
         is_active=user.is_active,
+        search_enabled=user.search_enabled,
         created_at=user.created_at,
         updated_at=user.updated_at,
         conversation_count=conv_count,
@@ -174,6 +177,39 @@ async def toggle_user_active(
         display_name=user.display_name,
         role=user.role,
         is_active=user.is_active,
+        search_enabled=user.search_enabled,
+        created_at=user.created_at,
+        updated_at=user.updated_at,
+    )
+
+
+@router.patch("/users/{user_id}/search-permission", response_model=AdminUserOut)
+async def toggle_user_search_permission(
+    user_id: str,
+    body: ToggleSearchPermissionRequest,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """切換使用者的鋼筋盤價助理使用權限。
+
+    跟 is_active 不同——admin 可以改自己（最差只是失去 search 功能，不會鎖死登入），
+    也不 bump token_version（搜尋權限是即時 DB 讀取的，不存在 token 內）。
+    """
+    user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user.search_enabled = body.search_enabled
+    await db.commit()
+    await db.refresh(user)
+
+    return AdminUserOut(
+        id=user.id,
+        email=user.email,
+        display_name=user.display_name,
+        role=user.role,
+        is_active=user.is_active,
+        search_enabled=user.search_enabled,
         created_at=user.created_at,
         updated_at=user.updated_at,
     )

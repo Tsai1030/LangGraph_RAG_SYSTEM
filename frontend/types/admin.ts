@@ -4,6 +4,7 @@ export interface AdminUserOut {
   display_name: string | null;
   role: "user" | "admin";
   is_active: boolean;
+  search_enabled: boolean;
   created_at: string;
   updated_at: string;
   conversation_count: number;

@@ -56,3 +56,21 @@ async def get_current_admin(
             detail="Admin access required",
         )
     return user
+
+
+async def require_search_permission(
+    user: User = Depends(get_current_user),
+) -> User:
+    """守鋼筋盤價助理 (/api/search/*) 的所有 endpoint。
+
+    Admin 不自動享有 search 權限——避免「admin 就有所有功能」這個假設；admin
+    要用 search 也得在 admin/users 頁打開自己的 search_enabled。
+
+    權限即時生效：get_current_user 每次 hit DB 重抓 User，不從 JWT payload 讀。
+    """
+    if not user.search_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="搜尋功能未開通，請聯絡管理員",
+        )
+    return user

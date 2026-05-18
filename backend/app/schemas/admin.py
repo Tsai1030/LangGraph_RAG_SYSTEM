@@ -9,6 +9,7 @@ class AdminUserOut(BaseModel):
     display_name: str | None
     role: str
     is_active: bool
+    search_enabled: bool = False
     created_at: datetime
     updated_at: datetime
     conversation_count: int = 0
@@ -26,6 +27,10 @@ class AdminUserListOut(BaseModel):
 
 class ToggleActiveRequest(BaseModel):
     is_active: bool
+
+
+class ToggleSearchPermissionRequest(BaseModel):
+    search_enabled: bool
 
 
 class AdminMessageOut(BaseModel):
