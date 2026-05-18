@@ -20,6 +20,16 @@ build/
 *.db
 *.db-shm
 *.db-wal
+# 備份 / snapshot 檔（如 app.db.backup-20260507-113555、app.db.pre-automation-*、
+# app.db.snapshot-before-rollback-*、langgraph.db.backup-* 等）— 本機 rollback 用，不入 git
+*.db.backup-*
+*.db.pre-*
+*.db.snapshot-*
+
+# Token / 容量分析輸出
+token*.csv
+token_report.txt
+form_structure.txt
 
 # ChromaDB 持久化資料
 backend/chroma_db/
