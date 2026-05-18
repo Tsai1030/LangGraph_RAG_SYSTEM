@@ -65,8 +65,7 @@ from pathlib import Path
 # they'll fall through to NULL, which is the right outcome.
 # ──────────────────────────────────────────────────────────────────────
 USERNAME_TO_EMAIL: dict[str, str] = {
-    # "admin": "chuang0279@gmail.com",  # ← prod 跑前把上面這行改成真正的 admin email
-    "admin": "admin@example.com",  # worktree 測試用；prod 跑前改成真正的 admin email
+    "admin": "pijh102511@gmail.com",
 }
 
 # ──────────────────────────────────────────────────────────────────────
