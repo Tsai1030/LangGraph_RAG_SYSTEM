@@ -202,7 +202,7 @@ export default function Sidebar({ collapsed, onToggle, onMobileClose }: Props) {
               className="shrink-0 rounded-md overflow-hidden hover:opacity-80 transition-opacity cursor-pointer"
               title="回到新對話"
             >
-              <Image src="/logo.png" alt="營造知識助理" width={24} height={24} className="size-6 object-contain" />
+              <Image src="/logo1.png" alt="營造知識助理" width={24} height={24} className="size-6 object-contain" />
             </button>
             <span className="text-zinc-100 font-medium text-sm truncate">營造知識助理</span>
           </div>

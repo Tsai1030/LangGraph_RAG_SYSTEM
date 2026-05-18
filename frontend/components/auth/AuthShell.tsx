@@ -35,7 +35,7 @@ export default function AuthShell({
           <div className="auth-brand">
             <Image
               className="auth-brand__logo"
-              src="/logo.png"
+              src="/logo1.png"
               alt=""
               width={36}
               height={36}
