@@ -172,6 +172,20 @@ app.include_router(chat.router, prefix="/api")
 app.include_router(export.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
 
+# ─── SEARCH module routers ───
+# Each router declares its own module-local prefix (e.g. "/search/generation",
+# "/admin/search-csc"). main.py adds /api here exactly once so URLs end up as
+# /api/search/... and /api/admin/search-*. The routers are split by surface
+# (generation = user-facing; csc + usage = admin-only) to keep auth deps
+# localised and avoid a giant grab-bag file.
+from app.modules.search.api import csc as search_csc
+from app.modules.search.api import generation as search_generation
+from app.modules.search.api import usage as search_usage
+
+app.include_router(search_generation.router, prefix="/api")
+app.include_router(search_csc.router, prefix="/api")
+app.include_router(search_usage.router, prefix="/api")
+
 _img_dir = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "data_markdown", "img")
 )
