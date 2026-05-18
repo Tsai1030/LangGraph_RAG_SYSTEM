@@ -104,7 +104,20 @@ async def lifespan(app: FastAPI):
 
         await _bootstrap_initial_admin()
 
-        yield
+        # ─── SEARCH module engine registration ───
+        # Just import the storage package (no create_all yet — models.py
+        # is intentionally empty until Phase 3.4). Importing here verifies
+        # the second engine + SearchBase wire up cleanly at startup, so
+        # we catch config errors early instead of at first /api/search/* hit.
+        from app.search_database import search_engine
+        from app.modules.search.storage import models as _search_models  # noqa: F401
+        print(f"[Startup] SEARCH_DB_PATH={settings.search_db_path}")
+        print(f"[Startup] SEARCH_ENGINE_URL={search_engine.url}")
+
+        try:
+            yield
+        finally:
+            await search_engine.dispose()
     # yield 結束（server 關閉）後，async with 自動關閉 conn
 
 
