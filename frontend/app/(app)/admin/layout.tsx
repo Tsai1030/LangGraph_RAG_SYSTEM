@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, BarChart3, Database, Users } from "lucide-react";
+import { ArrowLeft, BarChart3, Database, FileSpreadsheet, LineChart, Users } from "lucide-react";
 import { useAuthStore } from "@/store/authStore";
 import { cn } from "@/lib/utils";
 
@@ -11,6 +11,12 @@ const TABS = [
   { href: "/admin", label: "概覽", icon: BarChart3, exact: true },
   { href: "/admin/users", label: "使用者", icon: Users },
   { href: "/admin/vector", label: "向量庫", icon: Database },
+  // SEARCH module admin pages — separate from RAG admin scope but share
+  // the same /admin/* shell + admin auth guard. Suffix-style URLs
+  // (search-csc, search-usage) keep them grouped alphabetically in dev
+  // tools without nesting an extra route segment.
+  { href: "/admin/search-csc", label: "中鋼盤價", icon: FileSpreadsheet },
+  { href: "/admin/search-usage", label: "使用統計", icon: LineChart },
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {

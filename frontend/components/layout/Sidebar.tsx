@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Image from "next/image";
-import { Plus, Trash2, LogOut, Pencil, X, PanelLeft, MessageSquare, MoreHorizontal, HelpCircle, ChevronUp, ChevronDown, Shield } from "lucide-react";
+import { Plus, Trash2, LogOut, Pencil, X, PanelLeft, MessageSquare, MoreHorizontal, HelpCircle, ChevronUp, ChevronDown, Shield, BarChart3 } from "lucide-react";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
@@ -257,6 +257,37 @@ export default function Sidebar({ collapsed, onToggle, onMobileClose }: Props) {
           >
             <Plus size={14} className="shrink-0" />
             <span>新對話</span>
+          </button>
+        )}
+      </div>
+
+      {/* 鋼筋盤價助理 — always visible. Users without search_enabled land
+          on /search/no-access where they're told to contact admin; the
+          layout's permission guard does the redirect. We don't hide
+          the entry on no-permission because that makes the feature
+          undiscoverable for users who'd otherwise request access. */}
+      <div className="px-2 pb-1">
+        {collapsed ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  onClick={() => router.push("/search/generate")}
+                  className="w-full flex items-center justify-center size-8 rounded-md text-zinc-500 hover:text-zinc-100 hover:bg-zinc-800 transition-colors mx-auto"
+                />
+              }
+            >
+              <BarChart3 size={16} />
+            </TooltipTrigger>
+            <TooltipContent side="right">鋼筋盤價助理</TooltipContent>
+          </Tooltip>
+        ) : (
+          <button
+            onClick={() => router.push("/search/generate")}
+            className="w-full flex items-center gap-2 px-2.5 h-8 rounded-md text-xs text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors"
+          >
+            <BarChart3 size={14} className="shrink-0" />
+            <span>鋼筋盤價助理</span>
           </button>
         )}
       </div>

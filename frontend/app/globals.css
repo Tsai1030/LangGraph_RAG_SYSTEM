@@ -45,6 +45,46 @@
   --chart-3: oklch(0.439 0 0);
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
+
+  /* ─── SEARCH module (鋼筋盤價助理) — namespaced design tokens ───
+     Ported from SEARCH/frontend/src/app/globals.css with a --search-
+     prefix so they do NOT collide with RAG's --accent etc. Only the
+     subset actually referenced by components/search/* is defined here.
+     macOS Sequoia / Sonoma look-and-feel intentionally — keep distinct
+     from the rest of the RAG UI. */
+  --search-surface-window: oklch(99% 0.003 250);
+  --search-surface-titlebar: oklch(95% 0.005 250 / 0.85);
+  --search-surface-card: oklch(100% 0 0);
+  --search-surface-input: oklch(100% 0 0);
+  --search-surface-hover: oklch(94% 0.005 250);
+  --search-surface-selected: oklch(92% 0.025 256);
+
+  --search-text-primary: oklch(20% 0.01 250);
+  --search-text-secondary: oklch(45% 0.01 250);
+  --search-text-tertiary: oklch(60% 0.01 250);
+
+  --search-border-subtle: oklch(90% 0.004 250);
+
+  --search-accent: oklch(60% 0.21 256);
+  --search-accent-hover: oklch(56% 0.21 256);
+  --search-accent-soft: oklch(94% 0.04 256);
+
+  --search-status-success: oklch(60% 0.16 145);
+  --search-status-warn: oklch(70% 0.16 80);
+  --search-status-error: oklch(58% 0.22 27);
+
+  --search-radius-window: 12px;
+  --search-radius-card: 10px;
+  --search-radius-control: 6px;
+
+  --search-shadow-window:
+    0 0 0 0.5px oklch(0% 0 0 / 0.15),
+    0 12px 32px -8px oklch(0% 0 0 / 0.18),
+    0 4px 12px -4px oklch(0% 0 0 / 0.10);
+  --search-shadow-card:
+    0 0 0 0.5px oklch(0% 0 0 / 0.06),
+    0 1px 3px oklch(0% 0 0 / 0.05),
+    0 4px 12px -4px oklch(0% 0 0 / 0.08);
 }
 
 @theme inline {
