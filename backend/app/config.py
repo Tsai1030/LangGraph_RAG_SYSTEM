@@ -60,6 +60,12 @@ class Settings(BaseSettings):
     # generation_runs). Users table stays in app.db — SEARCH references
     # users only by UUID string (no cross-DB FK).
     search_db_path: str = "./search.db"
+    # Template + output paths. Both relative to backend/ at runtime (cwd
+    # when uvicorn starts). Kept as strings here, resolved to absolute
+    # Path objects in the orchestrator so the template is independent of
+    # the working directory the script was invoked from.
+    search_template_path: str = "./templates/meeting_template.docx"
+    search_output_dir: str = "./data/search_outputs"
     # steelnet.com.tw — source for 豐興 weekly opening + intl scrap paragraph.
     # Article body is behind member login.
     steelnet_user: str = ""

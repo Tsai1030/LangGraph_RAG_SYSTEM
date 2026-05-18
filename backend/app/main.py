@@ -104,15 +104,40 @@ async def lifespan(app: FastAPI):
 
         await _bootstrap_initial_admin()
 
-        # ─── SEARCH module engine registration ───
-        # Just import the storage package (no create_all yet — models.py
-        # is intentionally empty until Phase 3.4). Importing here verifies
-        # the second engine + SearchBase wire up cleanly at startup, so
-        # we catch config errors early instead of at first /api/search/* hit.
-        from app.search_database import search_engine
+        # ─── SEARCH module bootstrap ───
+        # Side-effect imports:
+        #   - app.modules.search triggers each @register decorator via the
+        #     explicit adapter imports in its __init__.py.
+        #   - app.modules.search.storage.models populates SearchBase.metadata
+        #     with the tables create_all needs to know about below.
+        from app.search_database import SearchAsyncSessionLocal, search_engine, SearchBase
+        import app.modules.search  # noqa: F401 — register source adapters
         from app.modules.search.storage import models as _search_models  # noqa: F401
-        print(f"[Startup] SEARCH_DB_PATH={settings.search_db_path}")
-        print(f"[Startup] SEARCH_ENGINE_URL={search_engine.url}")
+        from app.modules.search.storage import run_repo
+
+        # create_all is a SAFETY NET for greenfield deploys. In prod the
+        # tables already exist (created by scripts/migrate_search_db.py),
+        # so this is a no-op. Without it, an empty search.db file would
+        # silently 500 every /api/search/* request.
+        #
+        # metadata.create_all is sync — the run_sync wrapper hands it the
+        # sync connection that the async engine pools internally.
+        async with search_engine.begin() as conn:
+            await conn.run_sync(SearchBase.metadata.create_all)
+
+        # Reap any 'running' runs left behind by the previous process.
+        # PM2 restart / dev reload / crash all kill background asyncio
+        # tasks mid-run; without this sweep the frontend would poll those
+        # rows forever.
+        async with SearchAsyncSessionLocal() as db:
+            reaped = await run_repo.reap_stranded(db)
+            if reaped:
+                print(f"[Startup] SEARCH reaped {reaped} stranded run(s) to 'failed'", flush=True)
+
+        # flush=True so prints land in the PM2 / uvicorn log immediately;
+        # python's default stdout is block-buffered when not on a TTY.
+        print(f"[Startup] SEARCH_DB_PATH={settings.search_db_path}", flush=True)
+        print(f"[Startup] SEARCH_ENGINE_URL={search_engine.url}", flush=True)
 
         try:
             yield
