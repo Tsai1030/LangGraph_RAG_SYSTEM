@@ -1,13 +1,21 @@
-"""CSC (中鋼盤價) admin endpoints — read + overwrite the two snapshots.
+"""CSC (中鋼盤價) endpoints — seed defaults shared by all users.
 
-Two groups, both admin-managed:
-    GET /admin/search-csc/{group}  — anyone with search permission can read
-    PUT /admin/search-csc/{group}  — admin only; overwrites all rows + meta
+Two URLs, both rooted under /search/csc (not /admin/*) because the
+canonical reader is the wizard's CSC step, not an admin tool:
 
-The frontend admin form posts back the entire group at once. We don't
+    GET /search/csc/{group}  — any user with search_enabled — defaults
+                                used to pre-fill the wizard step.
+    PUT /search/csc/{group}  — admin only — overwrite the shared seed.
+                                Not exposed in the UI today; intended
+                                for curl / one-shot maintenance.
+
+The frontend posts back the entire group at once on a PUT. We don't
 expose partial updates — the row count must match the product list,
-otherwise we fail with 400. Half-written groups would leave the table
-inconsistent.
+otherwise the whole call 400s. Half-written groups would leave the
+table inconsistent.
+
+Per-run overrides are sent through /search/generation/{id}/internal-data
+(CscOverridePayload) — they never write to csc_price_state.
 """
 from __future__ import annotations
 
@@ -24,7 +32,7 @@ from ..core.csc_products import MONTHLY_PRODUCTS, QUARTERLY_PRODUCTS
 from ..storage import csc_repo
 from .schemas import CscSnapshotOut, CscSnapshotWriteRequest
 
-router = APIRouter(prefix="/admin/search-csc", tags=["search-admin-csc"])
+router = APIRouter(prefix="/search/csc", tags=["search-csc"])
 
 GroupName = Literal["monthly", "quarterly"]
 

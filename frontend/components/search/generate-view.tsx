@@ -21,13 +21,15 @@ import type {
   SearchInternalDataRequest,
 } from "@/lib/search/types";
 import { LoadingOverlay, type LoadingStep } from "@/components/search/loading-overlay";
+import { CscStepView, type CscStepPayload } from "@/components/search/csc-step-view";
 
 const STEP_DEFS = [
   { id: 1, label: "設定", icon: Settings2 },
   { id: 2, label: "抓取盤價", icon: PlayCircle },
   { id: 3, label: "抓取結果", icon: Table2 },
-  { id: 4, label: "補內部資料", icon: PenSquare },
-  { id: 5, label: "下載 Word", icon: Download },
+  { id: 4, label: "中鋼盤價", icon: Table2 },     // NEW — per-run CSC override
+  { id: 5, label: "補內部資料", icon: PenSquare },
+  { id: 6, label: "下載 Word", icon: Download },
 ] as const;
 
 // Durations calibrated to the real cloud workflow (~180 s end-to-end on
@@ -134,12 +136,19 @@ export function openingMondayLabel(isoDate: string): string {
  * other views (e.g. CscAdminView) inside the same MacShell — switching
  * between them via display:none preserves all in-flight state.
  */
+type WizardStep = 1 | 2 | 3 | 4 | 5 | 6;
+
 export function GenerateView() {
-  const [step, setStep] = useState<1 | 2 | 3 | 4 | 5>(1);
+  const [step, setStep] = useState<WizardStep>(1);
   const [meetingDate, setMeetingDate] = useState(
     () => new Date().toISOString().slice(0, 10),
   );
   const [result, setResult] = useState<SearchGenerationStatus | null>(null);
+  // Per-run CSC override collected at Step 4. null until the user
+  // completes the CSC step at least once; backend treats null as
+  // "fall back to shared admin seed". Stored at this level so the user
+  // can navigate back to Step 4 without losing their edits.
+  const [csc, setCsc] = useState<CscStepPayload | null>(null);
 
   const runMutation = useMutation({
     mutationFn: async (input: SearchGenerationRunRequest) => {
@@ -176,6 +185,11 @@ export function GenerateView() {
           meeting_conclusion_last_week: form.meeting_conclusion_last_week,
           meeting_conclusion_this_week: form.meeting_conclusion_this_week,
         },
+        // Per-run CSC override — undefined when user skipped Step 4
+        // entirely (e.g. they jumped via StepBar). Backend treats
+        // missing csc_override the same as missing both groups: read
+        // the shared admin seed.
+        csc_override: csc ?? undefined,
       };
       await api.post<SearchGenerationStatus>(
         `/search/generation/${result.run_id}/internal-data`,
@@ -185,7 +199,7 @@ export function GenerateView() {
     },
     onSuccess: (data) => {
       setResult(data);
-      setStep(5);
+      setStep(6);
     },
   });
 
@@ -240,7 +254,7 @@ export function GenerateView() {
       <PageHeader
         eyebrow="WORKFLOW"
         title="鋼筋採購週會記錄"
-        description="依序完成 5 個步驟即可產出 Word 檔案。系統會自動向 steelnet、OpenAI 等多個來源抓取本週市場資料。"
+        description="依序完成 6 個步驟即可產出 Word 檔案。系統會自動向 steelnet、OpenAI 等多個來源抓取本週市場資料，中鋼盤價可在 Step 4 自行調整。"
       />
 
       <StepBar current={step} onSelect={setStep} hasResult={!!result} />
@@ -270,19 +284,29 @@ export function GenerateView() {
           />
         )}
         {step === 4 && (
+          <CscStepView
+            initial={csc ?? undefined}
+            onBack={() => setStep(3)}
+            onComplete={(payload) => {
+              setCsc(payload);
+              setStep(5);
+            }}
+          />
+        )}
+        {step === 5 && (
           <Step4
             form={internalForm}
             isPending={internalMutation.isPending}
             error={internalMutation.error as Error | null}
             onSubmit={(d) => internalMutation.mutate(d)}
-            onBack={() => setStep(3)}
+            onBack={() => setStep(4)}
           />
         )}
-        {step === 5 && result && (
+        {step === 6 && result && (
           <Step5
             result={result}
             onDownload={downloadDocx}
-            onBack={() => setStep(4)}
+            onBack={() => setStep(5)}
           />
         )}
       </div>
@@ -352,7 +376,7 @@ function StepBar({
   hasResult,
 }: {
   current: number;
-  onSelect: (n: 1 | 2 | 3 | 4 | 5) => void;
+  onSelect: (n: WizardStep) => void;
   hasResult: boolean;
 }) {
   return (
@@ -368,7 +392,7 @@ function StepBar({
           <button
             key={s.id}
             disabled={disabled}
-            onClick={() => onSelect(s.id as 1 | 2 | 3 | 4 | 5)}
+            onClick={() => onSelect(s.id as WizardStep)}
             className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 text-[12px] font-medium rounded-md transition-all disabled:cursor-not-allowed disabled:opacity-40 whitespace-nowrap shrink-0"
             style={
               isActive

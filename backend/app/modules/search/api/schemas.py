@@ -21,15 +21,45 @@ class GenerationRunRequest(BaseModel):
     fengxing_open_date: date | None = None   # defaults to meeting_date if omitted
 
 
+class CscRowIn(BaseModel):
+    """One CSC row payload — prev + change; new_price is derived server-side."""
+    slot_index: int
+    prev_price: int
+    change_amount: int
+
+
+class CscOverrideGroup(BaseModel):
+    """One group's worth of CSC values, sent from the wizard's CSC step.
+
+    Shape matches the orchestrator's expected snapshot so a per-run
+    override and the shared admin seed are read with the same code path.
+    """
+    period_label: str = ""
+    announce_date: str = ""
+    rows: list[CscRowIn] = []
+
+
+class CscOverridePayload(BaseModel):
+    """Optional per-run CSC override sent with internal-data."""
+    monthly: CscOverrideGroup | None = None
+    quarterly: CscOverrideGroup | None = None
+
+
 class GenerationInternalDataRequest(BaseModel):
     """POST /search/generation/{id}/internal-data body.
 
-    Free-form key/value map — keys are slot keys (validated by orchestrator
-    against slot_schema, not here). Schema-level whitelisting would
-    couple HTTP DTO to slot_schema and make adding new internal slots a
-    two-place change.
+    Free-form key/value map for slot data — keys are slot keys (validated
+    by orchestrator against slot_schema, not here). Schema-level
+    whitelisting would couple HTTP DTO to slot_schema and make adding new
+    internal slots a two-place change.
+
+    csc_override (optional, per-run): full snapshots the user edited in
+    the wizard's CSC step. When present the orchestrator uses them
+    verbatim and skips reading csc_price_state. Either group can be
+    omitted to fall back to the shared admin seed.
     """
     internal_data: dict[str, str]
+    csc_override: CscOverridePayload | None = None
 
 
 class GenerationRunSummary(BaseModel):
@@ -73,13 +103,7 @@ class GenerationStatusResponse(BaseModel):
     notes: str | None = None
 
 
-# ─── CSC admin (中鋼月/季盤) ──────────────────────────────────────────
-
-class CscRowIn(BaseModel):
-    slot_index: int
-    prev_price: int
-    change_amount: int
-
+# ─── CSC (中鋼月/季盤) ─ admin seed + per-run override share this row shape ─
 
 class CscRowOut(BaseModel):
     slot_index: int

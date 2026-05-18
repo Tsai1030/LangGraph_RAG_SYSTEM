@@ -138,7 +138,7 @@ async def _node_narrate(state: GenerationState) -> dict:
     # ── 5 + 6. history + CSC slots (need their own session) ──
     async with SearchAsyncSessionLocal() as db:
         await _fill_history_slots(slot_values, confidence, db, opening_monday(meeting_d))
-        await _fill_csc_slots(slot_values, confidence, db)
+        await _fill_csc_slots(slot_values, confidence, db, state.get("csc_override"))
 
     return {"slot_values": slot_values, "confidence": confidence}
 
@@ -147,21 +147,40 @@ async def _fill_csc_slots(
     slot_values: dict[str, str],
     confidence: dict[str, str],
     db,
+    override: dict[str, dict] | None,
 ) -> None:
-    """Read both 中鋼 groups from DB and stuff their values into slot_values."""
+    """Fill 中鋼 slot values, per-group.
+
+    Source priority per group:
+        1. `override[group]` if present (wizard's CSC step) — used verbatim,
+           csc_repo not consulted. Shape must match read_snapshot output:
+           {period_label, announce_date, rows: [{slot_index, prev_price,
+           change_amount, ...}]}.
+        2. csc_repo.read_snapshot(db, group) — the admin-seeded shared
+           default. Same shape.
+
+    The new_price column accepts a provided value but falls back to
+    prev_price + change_amount when missing — frontends that only edit
+    prev/change don't have to compute the sum.
+    """
+    override = override or {}
     for group, prefix in (("monthly", "m"), ("quarterly", "q")):
-        snap = await csc_repo.read_snapshot(db, group)
+        snap = override.get(group) or await csc_repo.read_snapshot(db, group)
         period_key = f"csc_{group}_period"
         date_key = f"csc_{group}_announce_date"
-        slot_values[period_key] = snap["period_label"] or "—"
-        slot_values[date_key] = snap["announce_date"] or "—"
-        confidence[period_key] = "high" if snap["period_label"] else "low"
-        confidence[date_key] = "high" if snap["announce_date"] else "low"
-        for row in snap["rows"]:
+        period_label = snap.get("period_label") or ""
+        announce_date = snap.get("announce_date") or ""
+        slot_values[period_key] = period_label or "—"
+        slot_values[date_key] = announce_date or "—"
+        confidence[period_key] = "high" if period_label else "low"
+        confidence[date_key] = "high" if announce_date else "low"
+        for row in snap.get("rows") or []:
             idx = row["slot_index"]
-            prev = row["prev_price"]
-            change = row["change_amount"]
-            new = row["new_price"]
+            prev = row.get("prev_price", 0)
+            change = row.get("change_amount", 0)
+            new = row.get("new_price")
+            if new is None:
+                new = prev + change
             empty = (prev == 0 and change == 0)
             for col_key, val in (
                 (f"csc_{prefix}_{idx:02d}_prev",   prev),

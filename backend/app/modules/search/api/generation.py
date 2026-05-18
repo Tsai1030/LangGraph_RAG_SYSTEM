@@ -165,6 +165,7 @@ async def _execute_graph_and_persist(
     fengxing_d: date_t,
     started_by: str,
     internal_data: dict[str, str],
+    csc_override: dict[str, Any] | None = None,
 ) -> None:
     """Run the LangGraph, then persist result_json + final status.
 
@@ -183,6 +184,7 @@ async def _execute_graph_and_persist(
             "fengxing_open_date": fengxing_d,
             "started_by": started_by,
             "internal_data": internal_data,
+            "csc_override": csc_override,
             "retry_count": 0,
             "max_retries": 3,
         }
@@ -272,6 +274,15 @@ async def update_internal_data(
     await run_repo.update_status(db, run_id, status="running")
 
     fengxing_d = opening_monday(meeting_date)
+    # If the wizard's CSC step sent an override, hand it through to the
+    # graph. model_dump produces plain dicts the orchestrator can read
+    # without pydantic dependencies. None passes through unchanged so
+    # narrate falls back to csc_repo for both groups.
+    csc_override_dict = (
+        body.csc_override.model_dump(exclude_none=True)
+        if body.csc_override is not None
+        else None
+    )
     _spawn(
         _execute_graph_and_persist(
             run_id=run_id,
@@ -279,6 +290,7 @@ async def update_internal_data(
             fengxing_d=fengxing_d,
             started_by=str(user.id),
             internal_data=dict(body.internal_data),
+            csc_override=csc_override_dict,
         )
     )
     return GenerationStatusResponse(

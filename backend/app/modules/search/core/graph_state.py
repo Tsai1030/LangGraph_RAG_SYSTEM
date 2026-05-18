@@ -6,7 +6,7 @@ TypedDict gives type-checker support and prevents typos creating silent bugs.
 from __future__ import annotations
 
 from datetime import date
-from typing import Annotated, TypedDict
+from typing import Annotated, Any, TypedDict
 
 from langgraph.graph.message import add_messages
 
@@ -32,6 +32,15 @@ class GenerationState(TypedDict, total=False):
     fengxing_open_date: date
     started_by: str
     internal_data: dict[str, str]  # supplied by Step 4 form
+    # Per-run CSC override (option B): the wizard's CSC step ships the
+    # full snapshots for both groups back through internal-data. When
+    # present, narrate uses these values verbatim and skips reading
+    # csc_repo. Shape:
+    #   {"monthly":   {period_label, announce_date, rows: [...]},
+    #    "quarterly": {period_label, announce_date, rows: [...]}}
+    # Either group can be omitted to fall back to the shared seed in
+    # csc_price_state. Set None / missing entirely to fall back for both.
+    csc_override: dict[str, Any] | None
 
     # Outputs from each phase
     fetched: list[FetchResult]

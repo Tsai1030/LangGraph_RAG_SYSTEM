@@ -35,8 +35,22 @@ export interface SearchGenerationRunRequest {
   fengxing_open_date?: string;
 }
 
+/**
+ * Per-run CSC override sent inside internal-data. The shape mirrors
+ * CscSnapshotWriteRequest because the orchestrator treats a per-run
+ * override and the shared admin seed with the same code path.
+ *
+ * Either group may be omitted to fall back to the shared seed for
+ * just that group — useful if a user only wanted to tweak monthly.
+ */
+export interface SearchCscOverridePayload {
+  monthly?: SearchCscSaveRequest;
+  quarterly?: SearchCscSaveRequest;
+}
+
 export interface SearchInternalDataRequest {
   internal_data: Record<string, string>;
+  csc_override?: SearchCscOverridePayload;
 }
 
 // ── CSC admin (中鋼盤價) ──────────────────────────────────────────────
