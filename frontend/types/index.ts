@@ -9,6 +9,7 @@ export interface User {
   email: string;
   display_name: string | null;
   role?: "user" | "admin";
+  search_enabled?: boolean;
 }
 
 // Conversations

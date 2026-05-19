@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, BarChart3, Database, Users } from "lucide-react";
+import { ArrowLeft, BarChart3, Database, LineChart, Users } from "lucide-react";
 import { useAuthStore } from "@/store/authStore";
 import { cn } from "@/lib/utils";
 
@@ -11,6 +11,10 @@ const TABS = [
   { href: "/admin", label: "概覽", icon: BarChart3, exact: true },
   { href: "/admin/users", label: "使用者", icon: Users },
   { href: "/admin/vector", label: "向量庫", icon: Database },
+  // SEARCH usage stats — admin-only summary of who ran how many docs.
+  // 中鋼盤價 (CSC) deliberately not exposed here anymore — it's edited
+  // per-run inside the /search/generate wizard (option B redesign).
+  { href: "/admin/search-usage", label: "使用統計", icon: LineChart },
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {

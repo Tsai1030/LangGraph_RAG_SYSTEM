@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { tryRestoreSession } from "@/lib/auth";
 import { useAuthStore } from "@/store/authStore";
 import api from "@/lib/api";
@@ -17,6 +18,23 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(!!accessToken);
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  // Per-mount QueryClient. SEARCH components use @tanstack/react-query;
+  // RAG didn't need it but RQ providers are cheap. Mounting here (under
+  // the (app) auth group, not at app/layout.tsx) keeps the dev tools +
+  // cache scoped to authenticated screens.
+  const [queryClient] = useState(
+    () =>
+      new QueryClient({
+        defaultOptions: {
+          queries: {
+            staleTime: 30_000,
+            retry: 1,
+            refetchOnWindowFocus: false,
+          },
+        },
+      }),
+  );
 
   useEffect(() => {
     const init = async () => {
@@ -53,6 +71,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }
 
   return (
+    <QueryClientProvider client={queryClient}>
     <div className="flex h-screen overflow-hidden" style={{ background: "var(--content-bg)" }}>
       {/* Desktop Sidebar — animated width, hidden on mobile */}
       <div
@@ -102,5 +121,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         {children}
       </main>
     </div>
+    </QueryClientProvider>
   );
 }

@@ -57,5 +57,6 @@ class UserOut(BaseModel):
     email: str
     display_name: str | None
     role: str = "user"
+    search_enabled: bool = False
 
     model_config = {"from_attributes": True}

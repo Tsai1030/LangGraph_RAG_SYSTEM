@@ -55,9 +55,36 @@ class Settings(BaseSettings):
     langchain_api_key: str = ""
     langchain_project: str = "construction-rag"
 
+    # ─── SEARCH module (鋼筋盤價助理) ───
+    # Separate SQLite file for SEARCH's tables (price_history, csc_*,
+    # generation_runs). Users table stays in app.db — SEARCH references
+    # users only by UUID string (no cross-DB FK).
+    search_db_path: str = "./search.db"
+    # Template + output paths. Both relative to backend/ at runtime (cwd
+    # when uvicorn starts). Kept as strings here, resolved to absolute
+    # Path objects in the orchestrator so the template is independent of
+    # the working directory the script was invoked from.
+    search_template_path: str = "./templates/meeting_template.docx"
+    search_output_dir: str = "./data/search_outputs"
+    # steelnet.com.tw — source for 豐興 weekly opening + intl scrap paragraph.
+    # Article body is behind member login.
+    steelnet_user: str = ""
+    steelnet_password: str = ""
+    steelnet_base: str = "https://www.steelnet.com.tw"
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",")]
+
+    @property
+    def search_async_database_url(self) -> str:
+        """SQLAlchemy URL for the SEARCH-only SQLite (aiosqlite driver).
+
+        Mirrors database_url's form so the engine factory in
+        search_database.py can apply the same WAL pragmas / connect_args.
+        """
+        path = self.search_db_path.lstrip("./").lstrip(".\\")
+        return f"sqlite+aiosqlite:///{path}"
 
 
 settings = Settings()

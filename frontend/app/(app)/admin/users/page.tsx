@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { KeyRound, Search, ShieldCheck, UserCheck, UserX } from "lucide-react";
+import { KeyRound, Search, ShieldCheck, ToggleLeft, ToggleRight, UserCheck, UserX } from "lucide-react";
 import api from "@/lib/api";
 import type { AdminUserListOut, AdminUserOut } from "@/types/admin";
 import { useAuthStore } from "@/store/authStore";
@@ -51,6 +51,23 @@ export default function AdminUsersPage() {
     try {
       await api.patch(`/admin/users/${u.id}/active`, { is_active: !u.is_active });
       setToast(u.is_active ? `已停用 ${u.email}` : `已啟用 ${u.email}`);
+      await load();
+    } catch {
+      setToast("操作失敗");
+    } finally {
+      setBusyId(null);
+      setTimeout(() => setToast(null), 3000);
+    }
+  };
+
+  const onToggleSearch = async (u: AdminUserOut) => {
+    // 允許 admin 改自己 — 跟 is_active 不同 (鎖自己最差只是失去 search 功能)
+    const next = !u.search_enabled;
+    if (!confirm(next ? `開通 ${u.email} 的鋼筋盤價助理？` : `關閉 ${u.email} 的鋼筋盤價助理？`)) return;
+    setBusyId(u.id);
+    try {
+      await api.patch(`/admin/users/${u.id}/search-permission`, { search_enabled: next });
+      setToast(next ? `已開通 ${u.email}` : `已關閉 ${u.email}`);
       await load();
     } catch {
       setToast("操作失敗");
@@ -111,6 +128,7 @@ export default function AdminUsersPage() {
                 <th className="text-left font-medium px-4 py-3">名稱</th>
                 <th className="text-left font-medium px-4 py-3">角色</th>
                 <th className="text-left font-medium px-4 py-3">狀態</th>
+                <th className="text-left font-medium px-4 py-3">鋼筋盤價</th>
                 <th className="text-right font-medium px-4 py-3">對話數</th>
                 <th className="text-left font-medium px-4 py-3">最後活動</th>
                 <th className="text-right font-medium px-4 py-3">操作</th>
@@ -119,7 +137,7 @@ export default function AdminUsersPage() {
             <tbody>
               {loading && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-10 text-center text-zinc-500">
+                  <td colSpan={8} className="px-4 py-10 text-center text-zinc-500">
                     <span className="size-4 border-2 border-zinc-300 border-t-zinc-700 rounded-full animate-spin-fast inline-block mr-2 align-middle" />
                     載入中…
                   </td>
@@ -127,7 +145,7 @@ export default function AdminUsersPage() {
               )}
               {!loading && list?.items.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-10 text-center text-zinc-500">
+                  <td colSpan={8} className="px-4 py-10 text-center text-zinc-500">
                     沒有符合條件的使用者
                   </td>
                 </tr>
@@ -163,6 +181,26 @@ export default function AdminUsersPage() {
                         已停用
                       </span>
                     )}
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <button
+                      onClick={() => onToggleSearch(u)}
+                      disabled={busyId === u.id}
+                      title={u.search_enabled ? "點擊關閉鋼筋盤價助理權限" : "點擊開通鋼筋盤價助理權限"}
+                      className="inline-flex items-center gap-1 text-xs disabled:opacity-40 transition-colors"
+                    >
+                      {u.search_enabled ? (
+                        <>
+                          <ToggleRight size={20} className="text-emerald-600" />
+                          <span className="text-emerald-700">開通</span>
+                        </>
+                      ) : (
+                        <>
+                          <ToggleLeft size={20} className="text-zinc-400" />
+                          <span className="text-zinc-500">未開通</span>
+                        </>
+                      )}
+                    </button>
                   </td>
                   <td className="px-4 py-3 text-right text-zinc-600 tabular-nums">
                     {u.conversation_count}

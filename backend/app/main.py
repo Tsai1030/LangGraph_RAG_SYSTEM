@@ -104,7 +104,45 @@ async def lifespan(app: FastAPI):
 
         await _bootstrap_initial_admin()
 
-        yield
+        # ─── SEARCH module bootstrap ───
+        # Side-effect imports:
+        #   - app.modules.search triggers each @register decorator via the
+        #     explicit adapter imports in its __init__.py.
+        #   - app.modules.search.storage.models populates SearchBase.metadata
+        #     with the tables create_all needs to know about below.
+        from app.search_database import SearchAsyncSessionLocal, search_engine, SearchBase
+        import app.modules.search  # noqa: F401 — register source adapters
+        from app.modules.search.storage import models as _search_models  # noqa: F401
+        from app.modules.search.storage import run_repo
+
+        # create_all is a SAFETY NET for greenfield deploys. In prod the
+        # tables already exist (created by scripts/migrate_search_db.py),
+        # so this is a no-op. Without it, an empty search.db file would
+        # silently 500 every /api/search/* request.
+        #
+        # metadata.create_all is sync — the run_sync wrapper hands it the
+        # sync connection that the async engine pools internally.
+        async with search_engine.begin() as conn:
+            await conn.run_sync(SearchBase.metadata.create_all)
+
+        # Reap any 'running' runs left behind by the previous process.
+        # PM2 restart / dev reload / crash all kill background asyncio
+        # tasks mid-run; without this sweep the frontend would poll those
+        # rows forever.
+        async with SearchAsyncSessionLocal() as db:
+            reaped = await run_repo.reap_stranded(db)
+            if reaped:
+                print(f"[Startup] SEARCH reaped {reaped} stranded run(s) to 'failed'", flush=True)
+
+        # flush=True so prints land in the PM2 / uvicorn log immediately;
+        # python's default stdout is block-buffered when not on a TTY.
+        print(f"[Startup] SEARCH_DB_PATH={settings.search_db_path}", flush=True)
+        print(f"[Startup] SEARCH_ENGINE_URL={search_engine.url}", flush=True)
+
+        try:
+            yield
+        finally:
+            await search_engine.dispose()
     # yield 結束（server 關閉）後，async with 自動關閉 conn
 
 
@@ -133,6 +171,20 @@ app.include_router(conversations.router, prefix="/api")
 app.include_router(chat.router, prefix="/api")
 app.include_router(export.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
+
+# ─── SEARCH module routers ───
+# Each router declares its own module-local prefix (e.g. "/search/generation",
+# "/admin/search-csc"). main.py adds /api here exactly once so URLs end up as
+# /api/search/... and /api/admin/search-*. The routers are split by surface
+# (generation = user-facing; csc + usage = admin-only) to keep auth deps
+# localised and avoid a giant grab-bag file.
+from app.modules.search.api import csc as search_csc
+from app.modules.search.api import generation as search_generation
+from app.modules.search.api import usage as search_usage
+
+app.include_router(search_generation.router, prefix="/api")
+app.include_router(search_csc.router, prefix="/api")
+app.include_router(search_usage.router, prefix="/api")
 
 _img_dir = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "data_markdown", "img")
