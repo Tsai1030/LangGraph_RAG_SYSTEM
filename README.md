@@ -1,807 +1,493 @@
-# 營造知識助理 — LangGraph RAG + Form Agent
+# 營造知識助理
 
-營造業內部知識問答系統，整合 Adaptive RAG、CRAG 閉環修正、結構化意圖分類、靜態 Word 表單填寫 agent，以及對話式長期記憶。
+內部員工系統，目前整合兩個功能模組：
+
+- **RAG 問答 + 表單代填**（原系統）— 營造規範檢索、Adaptive RAG、CRAG 閉環、靜態 / 動態表單下載與 AI 代填
+- **鋼筋盤價助理**（SEARCH 模組）— 每週鋼筋採購週會 Word 自動產出：豐興開盤、國際廢鋼、中鋼月/季盤、各種敘述段落、歷史價格表
+
+公開網址（內部用）：`https://kccc3798.tail138ec9.ts.net`
 
 ---
 
 ## 目錄
 
-1. [系統概覽](#系統概覽)
-2. [技術棧](#技術棧)
-3. [系統架構](#系統架構)
-4. [LangGraph 狀態機設計](#langgraph-狀態機設計)
-5. [unified_intent — 統一意圖分類](#unified_intent--統一意圖分類)
-6. [表單系統設計](#表單系統設計)
-7. [RAG 檢索設計](#rag-檢索設計)
-8. [記憶系統設計](#記憶系統設計)
-9. [資料庫設計](#資料庫設計)
-10. [傳輸層設計](#傳輸層設計)
-11. [安全性設計](#安全性設計)
-12. [前端設計](#前端設計)
-13. [可觀測性與維運](#可觀測性與維運)
-14. [專案結構](#專案結構)
-15. [環境設定與啟動](#環境設定與啟動)
+1. [整體架構](#整體架構)
+2. [權限模型](#權限模型)
+3. [模組 A：RAG 問答 + 表單](#模組-a-rag-問答--表單)
+4. [模組 B：鋼筋盤價助理 (SEARCH)](#模組-b-鋼筋盤價助理-search)
+5. [專案結構](#專案結構)
+6. [技術棧](#技術棧)
+7. [本地開發](#本地開發)
+8. [生產部署 — PM2 + Caddy + Tailscale](#生產部署--pm2--caddy--tailscale)
+9. [維運與已知地雷](#維運與已知地雷)
+10. [延伸閱讀](#延伸閱讀)
 
 ---
 
-## 系統概覽
+## 整體架構
 
 ```
-使用者 → 前端 (Next.js) → FastAPI → LangGraph
-                                       ├─ unified_intent（單 LLM call 決定 6 種 intent + need_retrieval）
-                                       ├─ Hybrid RAG（intra-query Vector+BM25 RRF / inter-query rewrite RRF）
-                                       ├─ CRAG 閉環（grader + query rewriter，上限 2 次）
-                                       ├─ 靜態表單下載（registry 比對 + 認證下載）
-                                       ├─ 靜態表單 AI 代填（schema-driven，section 分組引導、跳段、cell_marker、AI 代寫）
-                                       ├─ 動態表單生成（Function Calling + Pydantic + 多輪延續）
-                                       ├─ 動態表單匯出（不打 LLM 直接轉檔 xlsx / csv）
-                                       ├─ 串流回覆（SSE）
-                                       └─ Token-based 記憶壓縮（8000 token 閾值）
-                                   ↓
-                              SQLite (對話 + 摘要)         ChromaDB (向量)
-                              langgraph.db (graph state)   data/generated_forms/ (已填寫 .docx / 匯出 .xlsx-csv)
+                       使用者瀏覽器
+                            │
+                            ▼
+        https://kccc3798.tail138ec9.ts.net (Tailscale Funnel)
+                            │
+                            ▼
+                      Caddy :9000
+                            │
+              ┌─────────────┴─────────────┐
+              │                           │
+        /api/* → :8000               其他 → :3000
+              │                           │
+              ▼                           ▼
+        FastAPI backend            Next.js frontend
+        (PM2: backend)             (PM2: frontend)
+              │
+              ├─ /api/auth/*               JWT 雙 token + bcrypt
+              ├─ /api/chat/stream         SSE: LangGraph 串流回覆 (RAG)
+              ├─ /api/conversations/*     CRUD + 對話狀態
+              ├─ /api/forms/*             RAG 表單下載 / 填寫
+              ├─ /api/admin/*             admin 後台 + search_enabled toggle
+              ├─ /api/search/generation/* SEARCH 模組：產 docx 流程
+              ├─ /api/search/csc/*        SEARCH 模組：中鋼盤價 seed
+              └─ /api/admin/search-usage  SEARCH 模組：使用統計
+              │
+              ├─ app.db          ← RAG: users + conversations + messages + summaries
+              ├─ langgraph.db    ← LangGraph state checkpointer
+              ├─ chroma_db / chroma_versions   ← RAG 向量庫
+              └─ search.db       ← SEARCH 模組獨立資料庫 (price_history / csc_* / generation_runs)
+              │
+              ├─ OpenAI API (gpt-5.4 + embedding)
+              └─ steelnet.com.tw (SEARCH 模組爬蟲, 會員認證)
 ```
 
-### 主要能力
+兩個模組**共用同一個 FastAPI 進程**、**同一個 Next.js bundle**、**同一份 .env**。SEARCH 是 RAG 的子模組 (`app/modules/search/`)，邊界靠模組獨立 DB + 命名空間維護（不跨 import RAG 內部）。
 
-- **問答**：營造規範、流程、條文檢索與整合回答（Adaptive + CRAG）
+---
+
+## 權限模型
+
+每個 user 有三個獨立的 flag：
+
+| 欄位 | 控制 |
+|---|---|
+| `is_active` | 整體登入；停用後立刻失效（token_version bump） |
+| `role` (`user` / `admin`) | 是否能進 `/admin/*` |
+| `search_enabled` | 是否能用鋼筋盤價助理；**admin 也預設關閉**，要自己開 |
+
+`search_enabled` 由 admin 在 `/admin/users` 介面切換，**即時生效**（每次 request `get_current_user` 都從 DB 重抓）。
+
+無權限的 user 點 sidebar「鋼筋盤價助理」會被 `/search/layout` 攔截 → 跳 `/search/no-access` 並顯示聯絡 admin 的 email。
+
+---
+
+## 模組 A：RAG 問答 + 表單
+
+### 能力
+
+- **問答**：營造規範、流程、條文檢索與整合回答（Adaptive + CRAG 閉環）
 - **靜態表單下載**：對 3 份預建檢核表（動員開工 / 工務所辦公室設置 / 工地文件管制）一鍵下載空白檔
-- **靜態表單 AI 代填**：使用者用自然語言描述要填的內容，agent 收集後寫入 Word 並回傳；支援按 `section` 分組引導、跨頁邏輯表（第 1-42 列跨表合併）、cell-marker 寫法（label 與值同 cell）、批次編輯、AI 代寫長文字、跳段（`繼續填寫下一頁`）、編輯已完成填寫
+- **靜態表單 AI 代填**：自然語言描述要填的內容，agent 寫好回傳；支援 section 分組引導、批次編輯、跳段、AI 代寫
 - **動態表單生成**：對沒有對應靜態表的需求，依 RAG context 即時生成結構化檢核表 / 報告書 / 計畫書 / 一般表格
-- **動態表單匯出**：將上一輪生成的動態表單轉成 .xlsx 或 .csv（純檔轉換，不重新打 LLM）
+- **動態表單匯出**：把上一輪生成的動態表單轉成 .xlsx 或 .csv（不重新打 LLM）
 
-> 想看每條路徑在 graph 中的詳細執行流程，見 [agent_flow.md](agent_flow.md)。
-
----
-
-## 技術棧
-
-### 後端
-
-| 類別 | 套件 |
-|------|------|
-| Web Framework | FastAPI |
-| 狀態機 / Agent | LangGraph、LangChain |
-| LLM / Embedding | OpenAI（GPT-5.4 系列、text-embedding-3-small） |
-| 向量資料庫 | ChromaDB（本地持久化、版本化） |
-| BM25 | rank-bm25 |
-| 中文分詞 | jieba（含 4,948 個營造業自訂詞典） |
-| 文件處理 | python-docx（讀寫 .docx 模板） |
-| Token 計算 | tiktoken |
-| ORM | SQLAlchemy（Async）+ aiosqlite |
-| Migration | Alembic |
-| 認證 | python-jose（JWT）、bcrypt |
-| 匯出 | openpyxl（Excel） |
-| 可觀測性 | LangSmith |
-
-### 前端
-
-| 類別 | 套件 |
-|------|------|
-| Framework | Next.js（App Router）、TypeScript |
-| 樣式 | Tailwind CSS v4 |
-| 狀態管理 | Zustand |
-| Markdown | react-markdown、remark-gfm |
-| UI 元件 | shadcn/ui（base-ui 內核） |
-| 圖示 | lucide-react |
-
----
-
-## 系統架構
-
-```
-data/
-├── backend/                           # FastAPI 後端
-│   ├── app/
-│   │   ├── api/                       # REST + SSE 端點
-│   │   ├── core/                      # JWT、bcrypt
-│   │   ├── graph/
-│   │   │   ├── builder.py             # 組裝 StateGraph 與條件邊
-│   │   │   ├── state.py               # GraphState TypedDict
-│   │   │   └── nodes/                 # 11 個節點
-│   │   ├── models/                    # SQLAlchemy ORM
-│   │   ├── rag/
-│   │   │   ├── form_lookup.py         # 靜態表 registry 召回
-│   │   │   ├── form_registry.json     # 表單 metadata（form_id / keywords / 顯示名）
-│   │   │   ├── form_schemas/*.json    # 三份表的欄位 schema
-│   │   │   ├── retriever.py           # Hybrid RRF 檢索
-│   │   │   └── vector_store.py        # ChromaDB 包裝
-│   │   ├── services/
-│   │   │   ├── conversation_service.py
-│   │   │   └── form_fill_writer.py    # 把 collected 寫入 .docx 副本
-│   │   └── main.py                    # FastAPI app + lifespan
-│   ├── data/generated_forms/          # 已填寫的 .docx（gitignored）
-│   ├── scripts/
-│   │   ├── build_form_schemas.py      # 從 .docx 離線產生欄位 schema
-│   │   ├── cleanup_orphan_forms.py    # 清理已刪對話的殘留 docx 與 langgraph 線程
-│   │   └── 01_preprocess.py … 07     # 知識庫向量索引 pipeline
-│   └── tests/
-│       └── test_unified_intent.py     # 24 個測試（純函式 + mock LLM）
-├── frontend/                          # Next.js 前端
-│   ├── app/(app)/                     # 主版型（sidebar + 內容）
-│   ├── components/
-│   │   ├── chat/
-│   │   │   ├── InputBar.tsx
-│   │   │   ├── FormPickerButton.tsx   # 上拉選單：選表單 + 下載 / AI 代填
-│   │   │   ├── FormFileCard.tsx
-│   │   │   └── MessageBubble.tsx
-│   │   └── layout/Sidebar.tsx
-│   ├── lib/                           # API client、SSE
-│   └── store/                         # Zustand
-├── data_markdown/
-│   ├── form_data/*.docx               # 三份原始表單範本
-│   └── *.md                           # 知識庫 Markdown 原文
-└── README.md
-```
-
----
-
-## LangGraph 狀態機設計
-
-### GraphState
-
-```python
-class GraphState(TypedDict):
-    conversation_id: str
-    user_id: str
-    messages: Annotated[list[BaseMessage], add_messages]
-    query: str
-
-    # RAG
-    retrieved_chunks: list[dict]
-    context: str
-    sources: list[dict]
-
-    # 意圖（unified_intent 輸出）
-    intent: str   # 'qa' | 'static_form_download' | 'static_form_fill'
-                  # | 'dynamic_form_generate' | 'form_continuation' | 'dynamic_form_export'
-    form_type: Optional[str]
-    export_format: Optional[str]   # 'xlsx' | 'csv'（dynamic_form_export 才填）
-
-    # 生成結果
-    response: str
-    form_data: Optional[dict]              # 動態表單
-    exported_form_file: Optional[dict]     # 動態匯出檔 metadata（form_exporter 寫入）
-
-    # 壓縮
-    is_compact_needed: bool
-    token_count: int
-    summary: Optional[str]
-
-    # 路由
-    need_retrieval: bool
-    retrieval_query: Optional[str]
-    retry_count: int
-    retrieval_grade: str
-    grader_reason: Optional[str]
-    grader_missing_information: Optional[str]
-
-    # 靜態表單匹配
-    matched_forms: list[dict]
-    form_explicit: bool
-
-    # 動態表單延續
-    prev_form_data: Optional[dict]
-    is_form_continuation: bool
-
-    # 靜態表單填寫 session（checkpointer 跨輪持久化）
-    form_fill_session: Optional[dict]
-    # {
-    #   "target_form_id": "010315",
-    #   "collected": {key: value},
-    #   "skipped_groups": ["sec:附件 1 - 修訂歷程", ...],   # 使用者「繼續填寫下一頁」累積
-    #   "status": "collecting" | "ready" | "completed",
-    #   "filled_token": "<filename>",
-    #   "filled_field_count": int,
-    #   "last_bulk_edit": "...",
-    #   "last_ghost_written": [keys],
-    # }
-```
-
-### 流程圖
+### LangGraph 流程
 
 ```
 START
-  └─► compact_check（tiktoken 計 token；> 8000 觸發摘要）
+  └─► compact_check (token > 8000 觸發摘要)
         ├─ true ─► summarizer ─┐
         └─ false ──────────────┘
                                 ▼
-                      unified_intent（單 LLM call，輸出 6 種 intent 之一）
+                      unified_intent (單 LLM call，輸出 6 種 intent)
                        │
-                       ├─ static_form_download → [responder ∥ source_filter] → END
-                       │
+                       ├─ static_form_download → responder → END
                        ├─ static_form_fill → form_template_loader
                        │                      ↓
                        │                  form_fill_collector
                        │                      ├─ status=ready → form_filler → responder → END
                        │                      └─ status=collecting → responder → END
-                       │
-                       ├─ dynamic_form_export → form_exporter（純檔轉換）→ responder → END
-                       │
-                       ├─ qa（need_retrieval=false）→ [responder ∥ source_filter] → END
-                       │
-                       └─ qa / dynamic_form_generate / form_continuation （need_retrieval=true）
+                       ├─ dynamic_form_export → form_exporter (純檔轉換) → responder → END
+                       ├─ qa (need_retrieval=false) → responder → END
+                       └─ qa / dynamic_form_generate / form_continuation
                               ↓
                           retriever → context_builder → retrieval_grader
                               ├─ insufficient (retry < 2) → query_rewriter → retriever
                               └─ sufficient / max retries
-                                    ├─ form 類 → form_structurer → [responder ∥ source_filter] → END
-                                    └─ qa ────────────────────► [responder ∥ source_filter] → END
+                                    ├─ form 類 → form_structurer → responder → END
+                                    └─ qa ────────────────────► responder → END
 ```
 
-> 完整 Mermaid 流程圖與每節點細說見 [agent_flow.md](agent_flow.md)。
+完整 mermaid 圖 + 每節點細說：[agent_flow.md](agent_flow.md)。
 
-### 節點清單
+### 關鍵設計
 
-| 節點 | 模型 | 功能 |
-|------|------|------|
-| `compact_check` | — | tiktoken 計算 token，> 8000 觸發摘要 |
-| `summarizer` | llm_model | 保留最近 8 則訊息，舊訊息壓縮為 ≤300 字摘要寫回 SQLite |
-| `unified_intent` | grader_model | 單一 LLM call 決定 intent / target_form_id / need_retrieval / export_format；詳見[下節](#unified_intent--統一意圖分類) |
-| `retriever` | — | Hybrid RAG：Vector+BM25 intra-query RRF；有 retrieval_query 時兩路 inter-query RRF |
-| `context_builder` | — | chunks 格式化為 LLM context，注入來源標頭與 Markdown 圖片語法 |
-| `retrieval_grader` | grader_model | structured output GraderOutput，回傳 sufficient/insufficient + missing_information |
-| `query_rewriter` | grader_model | 依 missing_information 改寫 query，遞增 retry_count |
-| `form_structurer` | form_model | Function Calling + Pydantic 生成動態表單 JSON；注入 prev_form_data 避免重複 |
-| `form_exporter` | — | 把 prev_form_data 用 openpyxl/csv 轉成 .xlsx 或 .csv（不打 LLM）|
-| `form_template_loader` | — | 確保 form_fill_session 處於可填寫狀態（新建/切表/重啟編輯） |
-| `form_fill_collector` | grader_model | LLM 抽欄位意圖 → code 列舉並套用（單欄抽取、批次編輯、代寫、自動填、跳段） |
-| `form_filler` | — | 用 python-docx 把 collected 寫入模板副本，支援 cell / cell_marker / para 三種 loc kind |
-| `responder` | llm_model | 串流回覆；依 intent + session 狀態切換系統提示（短確認 / 追問欄位 / 完整 RAG） |
-| `source_filter` | grader_model | 與 responder 並行；過濾 retrieved_chunks 為實質貢獻來源（前端 SourcesPanel）|
-
-### CheckPointer
-
-- LangGraph `AsyncSqliteSaver` 持久化 GraphState 於獨立的 `langgraph.db`
-- 每個對話對應一個 `thread_id = conversation_id`
-- 應用啟動時 `await checkpointer.setup()` 自動建表
-
----
-
-## unified_intent — 統一意圖分類
-
-### 設計理念
-
-歷史演進：
-- v1：`retrieval_router (LLM)` + `intent_classifier (keyword)` 雙層判斷，兩組 keyword 互相誤觸發
-- v2：合併為單一 node + 多條 keyword fast-path，但 keyword 集合膨脹至 51 條並出現「短訊息誤判」（例：使用者深度討論中說「我要 X 的詳細說明」被字面騙成索取靜態檔）
-- v3（現行）：**純 LLM 判斷 + post-normalization**，移除所有 fast-path 包括「冷啟動 → qa」（因為首輪也可能是動態表單請求或表單下載）
-
-| 層 | 由誰判斷 | 為什麼 |
-|---|---|---|
-| **LLM 主判斷** | grader_model（gpt-5.4） + structured output | 看完整對話脈絡，不被單一動詞字面騙 |
-| **Post-normalization**（程式碼） | 規則校驗 | 防 LLM 越界輸出（不存在的 form_id、缺 retrieval_topic、active session target 沿用等） |
-
-設計取捨：每輪多一次 LLM call（≈300-800ms），換取**上下文敏感度**與**零 keyword 維護負擔**。在 RAG 系統裡這個延遲與 retriever / responder 比起來微不足道。
-
-### 6 個 Intent
-
-| Intent | 說明 |
+| 設計 | 為什麼 |
 |---|---|
-| `qa` | 知識問答；matched_forms 仍可帶下載提示（僅 query 直接命中時，**不繼承 history fallback**）|
-| `static_form_download` | 索取既有表單空白檔下載 |
-| `static_form_fill` | 把資料填寫進既有表單，agent 寫好回傳 |
-| `dynamic_form_generate` | 沒對應靜態表，RAG 後即時生成結構化表單 |
-| `form_continuation` | 延續上一輪生成過的動態表單（再來幾組） |
-| `dynamic_form_export` | 把上一輪生成的動態表單轉成 xlsx / csv（不打 LLM、走 `form_exporter` 捷徑） |
+| 6 種 intent 用單一 LLM call (`unified_intent`) | 取代舊版「2 個 keyword + LLM」混合架構，避免 keyword 互打架 |
+| Hybrid RAG (intra-query Vector+BM25 RRF + inter-query rewrite RRF) | 兼顧語義 + 關鍵字 + CRAG 重寫融合 |
+| Form fill 用 `bulk_edits.label_keywords` (AND) | mini 模型不必列舉 N 筆 JSON；code 自己枚舉欄位 → 穩定 |
+| Token-based compaction at 8000 tokens | 保留最近 8 則 + 摘要寫 SQLite |
+| `form_fill_session` 跨輪持久化 | 透過 LangGraph checkpointer，前端不用管 |
 
-### 流程
-
-```
-input 準備
-  ├─ (candidates, candidates_from_history) = _resolve_candidates(query, recent_messages)
-  │     # query 命不中時 fallback 對話歷史，flag 標記是否來自 history
-  ├─ prev_form_data / fill_session
-  └─ recent = 最近 3 輪訊息（給 LLM 看）
-
-每輪都打 LLM → _llm_classify (with_structured_output(IntentDecision))
-        ├─ prompt 含對話歷史 / 候選表 / prev_form / fill_session 詳情
-        ├─ few-shot 多個範例覆蓋邊界 case（「我要 X 的詳細說明 = qa」、「給我 5 條 X = dynamic」等）
-        └─ 輸出 (intent, target_form_id, retrieval_topic, export_format, need_retrieval, reason)
-        ↓
-      _normalize_decision 校驗
-        ├─ static_form_* + target 不在候選 ∪ session id  → 退回 qa
-        ├─ static_form_* 但 target=null 且有 session → 沿用 session.target
-        ├─ form_continuation 缺 prev_form_data 或 retrieval_topic → 改 dynamic_form_generate
-        └─ dynamic_form_export 缺 prev_form_data → 改 qa
-        ↓
-      _build_state_update（接收 candidates_from_history flag）
-        ├─ qa 路徑：matched_forms = [] if from_history else candidates
-        │     避免問新主題時前輪表單一直黏在回覆結尾
-        └─ static_form_* 路徑：仍接受 history fallback（讓使用者第二輪無表名時能延續）
-```
-
-### IntentDecision schema
-
-```python
-class IntentDecision(BaseModel):
-    intent: Literal["qa", "static_form_download", "static_form_fill",
-                    "dynamic_form_generate", "form_continuation",
-                    "dynamic_form_export"]
-    target_form_id: Optional[str]      # static_form_* 必填
-    retrieval_topic: Optional[str]     # form_continuation 必填
-    export_format: Optional[Literal["xlsx", "csv"]]  # dynamic_form_export 必填
-    need_retrieval: bool
-    reason: str                         # 30 字內判斷依據（LangSmith / log 可追）
-```
-
-`reason` 欄位是核心 debug 機制：每次推理都自帶可解釋說明，例如：
-- `「明確詢問內容解說，非續填表」` — 判 qa 的依據
-- `「已完成表單的編輯指令，沿用session」` — 判 static_form_fill 的依據
-- `「要5條內容，屬新建動態表單」` — 判 dynamic_form_generate 的依據
-
-### Debug log 三段式
-
-每輪 `unified_intent` 跑完，logger 印三行（grep `[unified_intent]` 可串起整輪推理）：
-
-```
-[unified_intent] INPUT  | query='...' | candidates=[...] (from_history=True/False) | prev_form=... | fill_session={...}
-[unified_intent] LLM    | intent=... target=... need_retr=... | retrieval_topic=... export_format=... | reason='...'
-[unified_intent] STATE  | intent=... | matched_forms=[...] | form_explicit=... | need_retrieval=... | is_form_continuation=...
-```
-
-若 `_normalize_decision` 覆寫 LLM 判斷（越界保護），會額外印一行 `[unified_intent] OVERRIDE | intent X→Y | target A→B`。
-
-### 候選召回（_resolve_candidates）
-
-回傳 tuple `(candidates, from_history)`：
-
-- 先用 `lookup_forms(query)` 比對 form_registry keywords → 命中：`from_history=False`
-- 沒命中：拼接最近 3 輪對話文字再比對一次 → `from_history=True`
-- 都沒中：`([], False)`
-
-`from_history` flag 讓 `_build_state_update` 可以對 qa 路徑做「不繼承歷史候選」的決策，避免使用者問新主題時前輪表單一直黏在回覆結尾。
-
-### 程式碼結構
-
-```
-unified_intent.py
-├── Schema:        IntentDecision (6 intent + export_format)
-├── System prompt: 6 intent 定義 + 決策原則 + few-shot 範例（涵蓋 qa / static / dynamic / continuation / export）
-├── Pure helpers:  _resolve_candidates(回傳 tuple) / _resolve_form_meta
-│                  _build_history_text / _build_user_prompt
-│                  _normalize_decision / _build_state_update(接收 from_history)
-├── LLM wrapper:   _llm_classify
-└── Graph node:    unified_intent（含 INPUT / LLM / STATE 三段 log）
-```
-
-純函式分離讓單元測試容易（全 mock LLM，不需 API key 即可在 CI 跑）。
-
-### CRAG 閉環
-
-`retrieval_grader` 用 structured output 評估 context 品質：
-
-```python
-class GraderOutput(BaseModel):
-    decision: Literal["sufficient", "insufficient"]
-    reason: str
-    missing_information: str
-```
-
-- **sufficient** → 進下一階段（form_structurer 或 responder）
-- **insufficient** + retry < 2 → `query_rewriter` 依 `missing_information` 改寫 → 重新檢索
-- 達上限強制繼續，不無限循環
+詳細：見舊版 [README.md (git history) `acbb6fa^`](#) 或 [agent_flow.md](agent_flow.md)。
 
 ---
 
-## 表單系統設計
+## 模組 B：鋼筋盤價助理 (SEARCH)
 
-整個系統有**四條表單路徑**，互不衝突：
+### 能力
 
-| 路徑 | 觸發 | 流程 |
-|---|---|---|
-| **靜態表單下載** | `intent=static_form_download` | unified_intent 直接給 download_url，responder 短確認，前端 FormFileCard 下載 |
-| **靜態表單 AI 代填** | `intent=static_form_fill` | template_loader → fill_collector（多輪）→ filler → 產出新 .docx |
-| **動態表單生成** | `intent=dynamic_form_generate` 或 `form_continuation` | retriever → form_structurer (Function Calling) → 結構化 JSON |
-| **動態表單匯出** | `intent=dynamic_form_export` | unified_intent → form_exporter（純檔轉換）→ responder 短確認 → 推下載卡 |
+把過去手動產的「鋼筋採購週會記錄」Word 全自動化。流程是個 6 步驟 wizard，每個 user 自己跑：
 
-### 靜態表單 Registry
-
-`backend/app/rag/form_registry.json` 列出三份表的 metadata：
-
-```json
-[
-  {
-    "form_id": "010101",
-    "display_name": "動員開工作業檢核表",
-    "file_name": "010101動員開工作業檢核表.docx",
-    "keywords": ["動員開工", "開工", "動員", "工程啟動", "進場", ...]
-  }
-]
+```
+1. 設定會議日期 → 選下週一
+2. 抓取盤價       → LangGraph 跑 fetch/validate/persist (90-180s)
+                    抓豐興開盤、國際廢鋼、西本指數、LME 銅、國內+大陸市場分析
+3. 抓取結果       → 預覽所有 slot 與信心級別
+4. 中鋼盤價       → 預填上次 admin 設的 seed，可 per-run 調整 (per user, per run)
+5. 補內部資料      → 工程資訊、會議結論、合約量
+6. 下載 Word      → 透過 python-docx 把 {{slot}} 填入模板，產出 .docx
 ```
 
-`lookup_forms(query)` 純粹做候選召回（substring keyword 比對），最終決策由 unified_intent 處理。
+### 架構
 
-### 靜態表單 AI 代填（核心功能）
+- **HTTP 路由**：`/api/search/generation/*` (user 自己的) + `/api/search/csc/*` (seed 讀寫) + `/api/admin/search-usage` (admin 限定)
+- **DB**：獨立 `search.db`（不汙染 RAG 的 app.db）— 4 張表：`price_history` / `csc_price_state` / `csc_announcement_meta` / `generation_runs`
+- **跨 DB 關聯**：`generation_runs.started_by` 存 user UUID（app.db 的 RAG users.id），沒有真正的 FK
+- **背景執行**：POST `/run` 跟 POST `/internal-data` 都是 `asyncio.create_task` fire-and-forget，前端 polling `/{run_id}` 拿 status；LangGraph 跑 2-3 分鐘不會撐爆 HTTP timeout
+- **權限**：所有 `/api/search/*` 端點掛 `Depends(require_search_permission)`，沒 search_enabled 就 403
 
-**離線階段**：
+### LangGraph 流程
 
-- [`scripts/build_form_schemas.py`](backend/scripts/build_form_schemas.py) — 通用解析器，從 .docx 自動推欄位（適用 010101 / 010102 這類規律檢核表）
-- [`scripts/build_010315_schema.py`](backend/scripts/build_010315_schema.py) — 010315 專用手寫 schema 產生器（複雜結構：4 個附件、跨頁邏輯表、cell-marker、合併儲存格）
-- 通用解析器若看到 schema 已存在且 `manual: true`，會跳過不覆蓋（保留手寫版本）
-- [`scripts/inspect_form.py`](backend/scripts/inspect_form.py) — dump 一份 .docx 的真實 paragraph / table / cell 結構，方便除錯與決定 schema
-- [`scripts/verify_010315_schema.py`](backend/scripts/verify_010315_schema.py) — 驗證每個 marker / cell loc 在實際 docx 中找得到
-
-#### Schema 結構
-
-```json
-{
-  "form_id": "010315",
-  "title": "工地文件管制與保存表",
-  "file_name": "010315工地文件管制與保存表.docx",
-  "manual": true,                                          // 通用解析器看到會跳過
-  "fields": [
-    { "key": "att1_cover_version",
-      "label": "附件 1 - 封面・版次",
-      "sub_label": "版次",                                  // 給使用者看的子欄位名
-      "section": "附件 1 - 封面",                           // 引導分組依據
-      "type": "text", "required": false,
-      "loc": { "kind": "cell", "table_idx": 0, "row": 1, "col": 2 } },
-    { "key": "att1_ver_version",
-      "label": "附件 1 - 版本資訊・版本",
-      "sub_label": "版本",
-      "section": "附件 1 - 版本資訊",
-      "type": "text",
-      "loc": { "kind": "cell_marker",                       // 新型：值寫在 cell 內 marker 後
-               "table_idx": 1, "row": 1, "col": 6,
-               "marker": "版\t本：", "marker_end": null } }
-  ]
-}
+```
+START
+  ├─ fetch    parallel: fengxing / weekly_market / market_narrator (httpx + AsyncOpenAI)
+  ├─ validate flag low-confidence / missing values
+  ├─ persist  write price_history (key by opening_monday)
+  ├─ narrate  build slot_values + confidence dicts;
+              read history & CSC seed (or csc_override from wizard)
+  └─ render   asyncio.to_thread(python-docx) → write .docx
+END
 ```
 
-支援的欄位 `type`：`text` / `date` / `checkbox_vx`（自動正規化「完成」→「V」、「未完成」→「X」）。
-支援的 `loc.kind`：
-- `para` — 段落內 marker pattern（如「工程名稱：xxx\t」）。`marker_end` 可跨 \t 取代（如「年\t月\t日」）
-- `cell` — 直接覆寫整個 cell
-- `cell_marker` — cell 內已有 label 文字（如「版本：」），值寫在 marker 後（010315 的版本資訊頁、會簽單審查/核准意見用）
+完整移植記錄、為什麼從原 SEARCH repo 整合進來的設計決策、cascade-delete 事故與修法：[SEARCH_INTEGRATION_PLAN.md](SEARCH_INTEGRATION_PLAN.md)。
 
-| 表單 | 欄位數 | Schema 來源 |
-|---|---|---|
-| 010101 動員開工作業檢核表 | 58 | 通用解析器自動產 |
-| 010102 工務所辦公室設置作業檢核表 | 72 | 通用解析器自動產 |
-| 010315 工地文件管制與保存表 | 265 | 手寫（4 附件 × 多 section，跨頁邏輯表 1-42 列） |
+### 模組邊界
 
-**多輪互動 session**：`form_fill_session` 由 LangGraph checkpointer 跨輪持久化，不需前端管理。
+`app/modules/search/` 只能 import：
+- 自己內部
+- `app.models.user` / `app.core.dependencies` / `app.core.security`
+- `app.search_database` / `app.config`
 
-**form_fill_collector** 用 LLM structured output 表達**意圖**（不要求 LLM 列舉所有 key），由 code 列舉與套用：
+**禁止** import RAG 的 `app.api.{chat,conversations,export}` / `app.graph.*` / `app.rag.*` / `app.models.{conversation,message,summary}`。RAG 側對稱地禁止 import `app.modules.search.*`，只有 `main.py` mount router 的地方除外。
 
-```python
-class _Extraction(BaseModel):
-    extracted: list[_ExtractedField] = []      # 點對點：使用者明確指定某欄位的值
-    ghost_written: list[_ExtractedField] = []  # AI 代寫：使用者請 LLM 自己擬內容（限 type=text）
-    bulk_edits: list[_BulkEdit] = []           # 批次編輯：「把備註改成 X」這種一次更新一群欄位
-    user_done: bool                            # 結束指令（已完成填寫 / 就這樣 / OK / 改完了）
-    auto_fill_test: bool                       # 全部填佔位值（隨便填 / 全部 test）
-    skip_current_group: bool                   # 跳到下個 section（繼續填寫下一頁 / 跳過 / 下一個）
-    reason: str
+---
+
+## 專案結構
+
+```
+data/
+├── README.md                       本檔
+├── SEARCH_INTEGRATION_PLAN.md      SEARCH 整合計畫書 + post-mortem
+├── agent_flow.md                   RAG LangGraph 詳細流程
+├── DEPLOY.md / SETUP.md / PLAN.md  其他歷史文件
+├── ecosystem.config.js             PM2 設定 (backend:8000 / frontend:3000)
+├── start-system.bat                Windows 一鍵啟動 (PM2 + Caddy + Tailscale)
+├── .env                            ← 不入 git；OpenAI / JWT / SMTP / SEARCH / steelnet
+│
+├── backend/
+│   ├── pyproject.toml              uv 依賴
+│   ├── alembic/versions/           schema migrations
+│   ├── app.db                      ← RAG: users + conversations + messages + summaries
+│   ├── search.db                   ← SEARCH 模組獨立 DB
+│   ├── langgraph.db                LangGraph state checkpointer
+│   ├── chroma_db / chroma_versions RAG 向量庫
+│   ├── templates/                  SEARCH 用的 .docx 模板
+│   │
+│   ├── app/
+│   │   ├── main.py                 FastAPI app + lifespan (含 SEARCH 模組 bootstrap)
+│   │   ├── config.py / database.py 共用設定 / RAG DB engine
+│   │   ├── search_database.py      SEARCH 第二個 SQLAlchemy engine
+│   │   │
+│   │   ├── api/                    RAG: auth / chat (SSE) / conversations / admin / export
+│   │   ├── core/                   JWT / security / dependencies (含 require_search_permission)
+│   │   ├── models/                 RAG: User (含 search_enabled) / Conversation / Message / Summary
+│   │   ├── schemas/                Pydantic DTOs
+│   │   ├── graph/                  RAG LangGraph 節點與 builder
+│   │   ├── rag/                    向量檢索 / 表單 registry / 模板 schemas
+│   │   ├── services/               業務邏輯層
+│   │   ├── prompts/                所有 LLM prompt
+│   │   │
+│   │   └── modules/
+│   │       └── search/             ←─── 鋼筋盤價助理整套
+│   │           ├── core/           LangGraph orchestrator + slot_schema + dates
+│   │           ├── sources/        fengxing / weekly_market / market_narrator (httpx)
+│   │           ├── llm/            OpenAIClient (AsyncOpenAI + LangSmith wrap)
+│   │           ├── output/         python-docx renderer
+│   │           ├── storage/        async SQLAlchemy models + repos
+│   │           └── api/            generation / csc / usage routers
+│   │
+│   └── scripts/
+│       ├── 01_preprocess.py … 07   RAG 向量化 pipeline
+│       ├── build_form_schemas.py   RAG 表單 schema 產生器
+│       ├── inspect_form.py         RAG 表單結構 dump
+│       ├── cleanup_orphan_forms.py RAG 對話刪除後的副作用清理
+│       ├── dev.py                  Worktree dev launcher (port 8002)
+│       ├── smoke_search_orchestrator.py    SEARCH 模組 CLI smoke test
+│       └── migrate_search_db.py    一次性: SEARCH/app.db → data/search.db
+│
+└── frontend/
+    ├── package.json                yarn 依賴 (Next 16 + React 19 + axios + RQ)
+    ├── next.config.ts              /api/* rewrite → BACKEND_URL
+    ├── .env.local                  ← 不入 git；BACKEND_URL / NEXT_PUBLIC_BACKEND_URL
+    │
+    ├── app/
+    │   ├── layout.tsx              字體掛載 (Geist / Instrument Serif / Noto Serif TC / JetBrains Mono)
+    │   ├── globals.css             RAG tokens + SEARCH 模組 namespaced tokens (--search-*)
+    │   ├── (auth)/                 register / login / forgot-password / reset-password
+    │   └── (app)/                  認證後 layout (Sidebar + QueryClientProvider)
+    │       ├── new/                歡迎 / 首次輸入
+    │       ├── chat/[id]/          RAG 對話頁
+    │       ├── admin/              admin 後台 (含 search-usage)
+    │       └── search/             SEARCH 模組
+    │           ├── layout.tsx      權限 guard (search_enabled = false → no-access)
+    │           ├── generate/       6 步驟 wizard
+    │           └── no-access/      無權限提示
+    │
+    ├── components/
+    │   ├── layout/Sidebar.tsx      雙模組共用 sidebar (新對話 + 鋼筋盤價助理 + Recents)
+    │   ├── chat/                   RAG 訊息泡泡 / SourcesPanel / 表單元件
+    │   └── search/                 SEARCH 模組 wizard / loading / step / CSC editor
+    │
+    ├── lib/
+    │   ├── api.ts                  axios baseURL=/api + JWT interceptor
+    │   ├── sse.ts                  SSE 直連 backend (繞 Next.js dev rewrites)
+    │   └── search/types.ts         SEARCH 模組 DTO types (Search* prefix)
+    │
+    ├── store/                      Zustand (auth / chat)
+    └── types/                      RAG TypeScript DTOs
 ```
 
-`_BulkEdit` 用 `label_keywords: list[str]`（AND 邏輯）讓 LLM 只描述條件，code 自動枚舉所有 label 含這些關鍵字的 key。例：
+---
 
-| 使用者訊息 | LLM 輸出 | code 套用 |
-|---|---|---|
-| 「把備註的 test 改成 123」 | `{label_keywords:["備註"], old_value:"test", new_value:"123"}` | 找出 N 個 label 含「備註」且現值 = "test" 的 key，全改 |
-| 「2.1 的備註改成 done」 | `{label_keywords:["2.1","備註"], new_value:"done"}` | label 同時含「2.1」與「備註」的 1 個 key |
-| 「全部完成狀態打勾」 | `{label_keywords:["完成狀態"], new_value:"V"}` | 所有狀態欄改 V |
+## 技術棧
 
-**為什麼這樣設計**：mini 模型對「列舉 N 筆 key/value JSON」常會放棄；改成只輸出 1 筆意圖 spec、code 自己枚舉 → 穩定且乾淨。
+### 後端 (`backend/pyproject.toml`)
 
-### Section 引導與跳段
-
-`group_fields()`（[backend/app/graph/nodes/form_fill.py](backend/app/graph/nodes/form_fill.py)）把欄位分組：
-- 優先用 schema 的 `section` 欄位分組（010315 的「附件 1 - 封面」「附件 1 - 版本資訊」「附件 3 - 文件編號紀錄表」等）
-- 沒有 `section` 的 schema 走 fallback：用 label pattern 自動推（向後相容 010101 / 010102）
-
-每輪 `responder` 的追問模式（status=collecting）只**聚焦一個 section**，不會把 200 多個欄位一次倒給使用者。`select_next_group()` 挑下一個非 skip 的 pending group；使用者說「繼續填寫下一頁」會把當前 group_id 加進 `session.skipped_groups`，下輪換段。
-
-### 寫入 .docx（form_filler）
-
-[`form_fill_writer.write_filled_docx`](backend/app/services/form_fill_writer.py) 處理三種 `loc.kind`：
-
-| kind | 寫法 |
+| 類別 | 套件 |
 |---|---|
-| `para` | `_replace_marker_in_text(text, marker, marker_end, value)` — marker_end 為 None 吃到 \t 或行尾；指定時跨 \t 整段取代（如「年\t月\t日」→「年 2026/05/06日」） |
-| `cell` | 直接 `cell.text = value`（覆寫整個 cell） |
-| `cell_marker` | 在 cell 的 paragraph 內找到 marker，取代 marker 後內容（cell 內保留 label 文字） |
+| Web Framework | FastAPI |
+| Agent / 狀態機 | LangGraph 1.x + LangChain |
+| LLM | OpenAI gpt-5.4 系列 + AsyncOpenAI + LangSmith trace wrap |
+| Embedding | text-embedding-3-small |
+| 向量 DB | ChromaDB (PersistentClient, 版本化路徑) |
+| BM25 | rank-bm25 + jieba (4,948 個營造業詞典) |
+| 文件處理 | python-docx (RAG 表單代填 + SEARCH 模組 docx render) |
+| HTTP | httpx (AsyncClient — SEARCH 爬蟲) |
+| HTML 解析 | beautifulsoup4 + lxml (SEARCH 爬蟲) |
+| 重試 | tenacity (SEARCH 爬蟲) |
+| ORM | SQLAlchemy 2 (async) + aiosqlite |
+| Migration | Alembic (`render_as_batch=False` for 含 FK 的表 — 見 §維運) |
+| 認證 | python-jose JWT + bcrypt |
+| Rate limit | slowapi |
+| SMTP | aiosmtplib (密碼重設信) |
 
-- checkbox：`_coerce_value` 把 `完成 / V / yes / 1` → `V`，`未完成 / X / no / 0` → `X`
-- 輸出檔名 `<conversation_id>_<form_id>_<timestamp>.docx`，存於 `data/generated_forms/`
+### 前端 (`frontend/package.json`)
 
-### 完整對話範例
-
-```
-U: 我要填動員開工檢核表          → 開新 session
-A: 收到，請先提供：工程名稱、工令、製表日期...
-   也可一次描述多個欄位；輸入「已完成填寫」立即下載、「繼續填寫下一頁」換段、「全部填 test」一鍵補滿
-
-U: 工程名稱叫和平大樓，工令BES-001  → LLM extracted=[(工程名稱,...), (工令,...)]
-A: 已收到工程名稱、工令。請再提供：製表日期、1.19 完成狀態...
-
-U: 全部填test                    → auto_fill_test → 所有欄位佔位填 V/test
-A: 已將您的資料填入《動員開工作業檢核表》，請點選下方下載。 [下載按鈕]
-
-U: 把備註的 test 改成 123        → resume completed → bulk_edit
-A: 已將 N 個含「備註」的欄位更新為「123」，輸入「已完成填寫」下載新版本
-
-U: 已完成填寫                    → user_done → filler 重跑 → 新下載連結
-```
-
-### 動態表單生成
-
-對於沒有對應靜態表的需求（候選為空 / 使用者要新版本），`form_structurer` 用 Function Calling 即時生成：
-
-```python
-class FormSchema(BaseModel):
-    form_type: Literal["checklist", "report", "plan", "table"]
-    title: str
-    subtitle: Optional[str] = None
-    columns: list[str]
-    rows: list[str]      # pipe-separated 字串："欄1值|欄2值|欄3值"
-    notes: Optional[str] = None
-```
-
-> `rows` 用 `list[str]` 而非 `list[dict]` 是因為 `dict[str, str]` 在 Function Calling JSON Schema 會產生 `additionalProperties` 導致模型略過該欄位。Python 側再轉換為 `list[dict]`。
-
-支援多輪延續：`prev_form_data` 自 checkpointer 載入前輪結果，prompt 注入避免重複內容。
+| 類別 | 套件 |
+|---|---|
+| Framework | Next.js 16 (App Router) + React 19 + TypeScript |
+| 樣式 | Tailwind v4 + tw-animate-css |
+| Data fetching | axios + @tanstack/react-query (SEARCH 模組) |
+| 狀態 | Zustand (auth / chat) + React Query (SEARCH wizard) |
+| 表單 | react-hook-form + zod + @hookform/resolvers |
+| UI | shadcn (base-ui) + lucide-react + recharts |
+| Markdown | react-markdown + remark-gfm |
+| 字體 | Geist / Geist Mono / Instrument Serif / JetBrains Mono / Noto Serif TC (sidebar 標題) |
 
 ---
 
-## RAG 檢索設計
+## 本地開發
 
-### Hybrid Search（兩層 RRF）
+完整一鍵 setup：見 [SETUP.md](SETUP.md)。簡化版：
 
+```bash
+# 1. clone + env
+git clone <repo>
+cd data
+cp .env.example .env
+# 補 OPENAI_API_KEY / SECRET_KEY / STEELNET_USER/PASSWORD 等
+
+# 2. backend
+cd backend
+uv sync
+uv run alembic upgrade head
+uv run uvicorn app.main:app --reload --port 8000
+
+# 3. frontend (另一個 terminal)
+cd frontend
+yarn install
+yarn dev      # 預設 3000
+
+# 4. 知識庫 (第一次或更新時)
+cd backend
+uv run python scripts/01_preprocess.py
+uv run python scripts/02_chunk.py
+uv run python scripts/05_embed_ingest.py
 ```
-                ┌─ query ─────────────────────────────────────┐
-                │                                             │ （CRAG rewrite 或 form continuation）
-                ▼                                             ▼
-   intra-query RRF                                retrieval_query
-     ├─ Vector  → ChromaDB top-20                  同樣執行 intra-query RRF → top-8
-     └─ BM25    → rank-bm25 top-20
-           ↓
-     RRF 融合 → top-8
-                │                                             │
-                └────────── inter-query RRF ──────────────────┘
-                                  ↓
-                            merged top-8 chunks
-                  （兩組都出現的 chunk 自動加分）
-```
 
-### 元件
+開瀏覽器到 `http://localhost:3000`，註冊帳號後直接用。
 
-- **向量搜尋**：`text-embedding-3-small` + ChromaDB PersistentClient（版本化路徑：`chroma_versions/v1/` 等）；同步 API 用 `asyncio.to_thread` 包裝避免阻塞
-- **BM25**：rank-bm25 + jieba（含 4,948 個營造業自訂詞典，從 chunks tags 自動產出）；首次 query 時 lazy 建索引、之後 singleton 快取
-- **RRF**：`score(d) = Σ 1/(k+rank(d))`，k=60，兩路各 top-20 → 去重融合 → 最終 top-8
+### Worktree 隔離 dev (整合期使用過、現在可省略)
+
+整合 SEARCH 模組期間用過 `data-search-module/` worktree 跑在 8002/3001 避免撞 prod。若以後要做大改動可重複此 pattern，見 [SEARCH_INTEGRATION_PLAN.md §0.3](SEARCH_INTEGRATION_PLAN.md)。
 
 ---
 
-## 記憶系統設計
+## 生產部署 — PM2 + Caddy + Tailscale
 
-### 雙層記憶
-
-| 層 | 機制 | 持久化 |
-|---|---|---|
-| **短期**（對話狀態） | `add_messages` reducer + LangGraph state | `langgraph.db`（AsyncSqliteSaver） |
-| **長期**（前情摘要） | 業務邏輯 `upsert_summary` | `app.db / conversation_summaries` |
-
-### Token-Based Compaction
-
-**觸發**：`COMPACT_THRESHOLD = 8000` tokens。
-
-1. `compact_check`：tiktoken（cl100k_base）計算全部 messages
-2. 超閾值 → `summarizer`
-3. 保留最近 **8 則**訊息（≈4 輪），其餘為「舊訊息」
-4. LLM 生成 ≤300 字繁體中文前情提要
-5. `RemoveMessage` 批量刪舊訊息
-6. `upsert_summary` 非同步寫 SQLite（失敗不阻斷主流程）
-
-### 摘要注入
-
-每輪對話開始前從 SQLite 讀 summary，注入 system prompt：
+### 拓樸
 
 ```
-[前情摘要]
-{summary}
+網際網路
+    │
+    ▼  https://kccc3798.tail138ec9.ts.net (HTTPS — Tailscale 簽憑證)
+Tailscale Funnel
+    │
+    ▼  本機 :9000
+Caddy
+    │  /api/*  →  127.0.0.1:8000  (FastAPI)
+    │  /       →  127.0.0.1:3000  (Next.js prod build)
+    │
+PM2 (常駐)
+    ├─ backend     uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
+    └─ frontend    next start -H 0.0.0.0 -p 3000
 ```
 
-### 各 node 對歷史的使用
+`ecosystem.config.js` 描述 PM2 兩個 process。`C:\caddy\Caddyfile` 是反向代理（簡單兩條規則，不在 git 內）。
 
-| Node | 讀歷史方式 | 為什麼 |
-|---|---|---|
-| `unified_intent` | 最近 3 輪（用於 LLM 判斷與 _resolve_candidates fallback） | 要做意圖延續判斷 |
-| `retriever` | 不讀 | 向量搜尋只看單一 query |
-| `responder`（qa） | 完整 messages | 對話延續性 |
-| `responder`（fill） | 主要看 `form_fill_session` 摘要 | 任務型，看欄位狀態 |
-| `form_fill_collector` | 不讀 | 只抽取本輪訊息的意圖，避免抓到舊值 |
+### 一鍵啟動
+
+```powershell
+# 開新 PowerShell (UAC 會跳出來，要按是) 跑 start-system.bat
+.\start-system.bat
+```
+
+start-system.bat 流程：
+1. `pm2 delete all` 然後 `pm2 start ecosystem.config.js`
+2. 等 backend:8000 + frontend:3000 真的 listen
+3. 殺舊 Caddy + 啟動新的（防止 Caddy 對舊上游 cache 502）
+4. `tailscale funnel --bg 9000` 開放外網
+
+### 手動操作
+
+```powershell
+pm2 restart all                # 只重啟 process，不動 Caddy / Tailscale
+pm2 logs backend --lines 100   # 看 stdout（含 [Startup] 印的 SEARCH_DB_PATH）
+pm2 logs backend --err         # 看 stderr（exception trace）
+pm2 stop backend               # 停（緊急用）
+pm2 list                       # 看 status / uptime / restart count
+```
+
+### 部署新版（cutover SOP）
+
+> 整合 SEARCH 模組那次的詳細步驟、event order、rollback、cascade-delete 事故都在 [SEARCH_INTEGRATION_PLAN.md Phase 6](SEARCH_INTEGRATION_PLAN.md)。任何牽涉 schema migration 的部署前，務必照那份做。
+
+通用版：
+
+```powershell
+cd C:\Users\226376\Desktop\data
+
+# 1. 備份 (照原本命名習慣)
+$ts = Get-Date -Format "yyyyMMdd-HHmmss"
+cp backend/app.db "backend/app.db.pre-deploy-$ts"
+
+# 2. 拉新 code
+git pull
+
+# 3. backend deps + DB migration
+cd backend
+uv sync
+uv run alembic upgrade head    # ⚠ schema migration 前先讀 §維運的 SQLite cascade 陷阱
+cd ..
+
+# 4. frontend deps + prod build (next start 讀 .next/，不 build 就不會更新)
+cd frontend
+yarn install
+yarn build
+cd ..
+
+# 5. 重啟 PM2
+pm2 restart all
+
+# 6. 驗證
+tailscale funnel status
+curl https://kccc3798.tail138ec9.ts.net/api/health
+```
 
 ---
 
-## 資料庫設計
+## 維運與已知地雷
 
-### 業務資料庫（app.db）
+### 🔴 SQLite cascade-delete via `batch_alter_table` (歷史地雷)
 
-**users**
+整合 SEARCH 模組那次 alembic migration 用 `batch_alter_table` 在 SQLite 上 ADD COLUMN，導致 cascade-delete 砍掉 52 個 conversation + 321 個 message。
+
+**根因**：`batch_alter_table` 在 SQLite 上是「CREATE _new + INSERT SELECT + DROP old + RENAME」。`DROP TABLE users` 觸發 ON DELETE CASCADE → users → conversations → messages → conversation_summaries 整條鏈被砍光。
+
+**修法**：alembic migration 寫 `op.add_column(...)` 而**不要**用 `batch_alter_table`。SQLite 原生 ADD COLUMN with NOT NULL DEFAULT 從 3.2 就有。詳細 [commit fdcb726](#)。
+
+**Schema migration 前的 SOP**：
+1. **一定先備份 `app.db`** (帶 timestamp 命名跟既有 backup 一致)
+2. 看 migration 是否動到 `users` / `conversations` 表
+3. 是的話，**避免用 `batch_alter_table`**，改用 `op.add_column` / `op.execute(raw SQL)` 或乾脆 `PRAGMA foreign_keys=OFF` 包起來
+4. 在 worktree 跑過一遍才上 prod
+
+### 🔴 SQLite WAL/SHM 殘留導致 schema 視角錯亂
+
+restore app.db 從備份蓋回時，舊的 `app.db-wal` / `app.db-shm` 還在，新連線會被它們蒙蔽看到舊 schema。
+
+**症狀**：alembic 印 "已加 search_enabled column"，sqlite3 query 看得到欄位，但 aiosqlite 透過 SQLAlchemy 進來就說 "no such column"。
+
+**修法**：每次 `cp backup app.db` 後**手動刪** `-wal` 跟 `-shm`：
+```powershell
+Remove-Item app.db-wal, app.db-shm -Force -ErrorAction SilentlyContinue
 ```
-id (UUID PK), email (UNIQUE INDEX), password_hash (bcrypt rounds=12),
-display_name, is_active, created_at, updated_at
+
+### 🟡 SEARCH 的 SSE 直連 backend (不走 Next.js rewrites)
+
+`lib/sse.ts` 對 `/api/chat/stream` 跟 SEARCH 的長 polling 都是**直連** backend，繞過 Next.js dev rewrites（dev rewrite 有 response buffering、會切斷 SSE）。
+
+→ 後果是 backend 的 CORS 必須允許 frontend 的 origin。`CORS_ORIGINS` 在 `.env` 設好。
+
+### 🟡 PM2 frontend 不會自動 hot-reload
+
+`next start` 啟動時讀一次 `.next/`，之後不會 watch 變更。修 code 後一定要：
+```powershell
+cd frontend ; yarn build ; cd .. ; pm2 restart frontend
 ```
 
-**conversations**（CASCADE DELETE 訊息與摘要）
-```
-id (UUID PK), user_id (FK INDEX), title, is_archived, created_at, updated_at
-```
+### Backup 命名規範
 
-**messages**
-```
-id, conversation_id (FK), role ('user'|'assistant'|'system'),
-content, metadata (JSON), created_at
-INDEX: (conversation_id, created_at)
-```
+| Pattern | 用途 |
+|---|---|
+| `app.db.backup-YYYYMMDD-HHMMSS` | 一般定期備份 |
+| `app.db.pre-<feature>-YYYYMMDD-HHMMSS` | 重大變更前 (alembic 升級、重新 build) |
+| `app.db.snapshot-before-rollback-...` | rollback 前的最後一份 |
+| `app.db.broken-<reason>-...` | 出事的當下保存 (forensic) |
 
-**conversation_summaries**（1:1 對應 conversations）
-```
-id, conversation_id (FK UNIQUE), summary (≤300 字),
-summarized_message_count, updated_at
-```
-
-### ORM 設定
-
-- WAL 模式（並發讀寫）
-- `PRAGMA foreign_keys=ON`（CASCADE 正確生效）
-- Alembic `render_as_batch=True`（SQLite ALTER TABLE 限制）
-- `expire_on_commit=False`（避免 async lazy loading 問題）
-
-### 狀態機資料庫（langgraph.db）
-
-由 `AsyncSqliteSaver` 管理，與 `app.db` 完全分離。
+`.gitignore` 內 `*.db.backup-* / *.db.pre-* / *.db.snapshot-*` 都已排除 — 不會誤入 git。
 
 ### 對話刪除的副作用清理
 
-`delete_conversation` 在 SQL CASCADE 後 best-effort 清理：
+`delete_conversation` 已自動清 `data/generated_forms/<conv_id>_*.docx` + langgraph.db checkpoint。但若直接 SQL DELETE 沒走 service 層，會留 orphan：
 
-1. `delete_generated_for_conversation()` — 刪 `data/generated_forms/<conv_id>_*.docx`
-2. `checkpointer.adelete_thread(conv_id)` — 清 langgraph.db 該對話的 graph state
-3. 任一步失敗只記 log，不回滾 SQL（對話已刪）
-
----
-
-## 傳輸層設計
-
-### API 端點
-
+```bash
+cd backend
+uv run python scripts/cleanup_orphan_forms.py            # dry-run
+uv run python scripts/cleanup_orphan_forms.py --apply    # 真刪
 ```
-POST /api/auth/register / login / refresh / logout
-
-GET  /api/conversations
-POST /api/conversations
-GET  /api/conversations/{id}
-DEL  /api/conversations/{id}             # 連動清理 generated_forms 與 langgraph.db
-
-POST /api/chat/stream                    # SSE
-
-GET  /api/forms                          # 列出所有靜態表 metadata（FormPickerButton 用）
-GET  /api/forms/{form_id}/download       # 下載空白模板
-GET  /api/forms/filled/{token}           # 下載 agent 填好的 .docx（驗證 conv_id 屬於使用者）
-
-GET  /api/images/{path}                  # 知識庫圖片
-```
-
-### SSE 事件
-
-```jsonc
-{"type": "text",         "content": "..."}      // 逐 token 文字
-{"type": "form_loading"}                         // 動態表單生成開始
-{"type": "sources",      "data": [...]}          // 參考來源（一次性）
-{"type": "form",         "data": {...}}          // 動態表單 JSON（一次性）
-{"type": "form_files",   "data": [{form_id, display_name, download_url}]}
-                                                 // 靜態表單下載卡（含已填寫版本）
-{"type": "error",        "content": "..."}
-{"type": "done"}
-```
-
-> **`form_files` 推送邏輯**（[backend/app/api/chat.py](backend/app/api/chat.py)）：
-> - `intent=dynamic_form_export + exported_form_file 存在` → 推匯出檔（.xlsx / .csv）
-> - `intent=static_form_fill + status=completed + filled_token` → 推已填寫 .docx（display_name 加「（已填寫）」前綴）
-> - `intent=static_form_fill + status=collecting` → **抑制**（避免使用者誤點下載空白模板）
-> - 其他 intent（如 qa）→ 沿用 `unified_intent` 設定的 `matched_forms`（qa 只在 query 直接命中表名時有值）
->
-> 重要：`fill_session` 透過 checkpointer 跨輪持久化、`filled_token` 不會自動清掉。**form_files 推送的 intent gate 確保已填表 card 只在當下這輪是 static_form_fill 時出現**，不會跨輪殘留到後續的 qa / dynamic 回覆中。
-
----
-
-## 安全性設計
-
-### JWT 雙 Token
-
-- **Access Token**（HS256，120 分鐘）→ 前端 memory（非 localStorage）
-- **Refresh Token**（HS256，7 天）→ HttpOnly Cookie（secure / samesite=strict / path=/api/auth）
-- 每次 `/auth/refresh` 同時輪換 Refresh Token
-
-### 密碼
-
-bcrypt rounds=12，`bcrypt.checkpw()` 時間安全比對。
-
-### API 保護
-
-- 所有對話端點需 Bearer Token，`Depends(get_current_user)` 統一注入
-- 查詢時強制帶 user_id 過濾，防越權
-- **填寫檔下載**：`/api/forms/filled/{token}` 從 token 解析出 conv_id，驗證對話屬於當前使用者；不通過回 404（不洩露存在性）
-
----
-
-## 前端設計
-
-### 主要頁面
-
-```
-app/
-├── (auth)/login/                       # 登入
-└── (app)/
-    ├── layout.tsx                      # Sidebar + 主內容
-    ├── new/                            # 歡迎頁 + 首次輸入
-    └── chat/[conversationId]/          # 對話頁
-```
-
-### 狀態管理
-
-```typescript
-useChatStore {
-  conversations: ConversationOut[]      // sidebar 列表
-  currentMessages: MessageOut[]         // 當前對話
-  pendingMessage: string | null         // /new → /chat/[id] 跨頁傳遞
-}
-```
-
-### InputBar + FormPickerButton
-
-```
-┌────────────────────────────────────────┐
-│ [📁]  輸入問題...                [⬆️]  │
-└──┬─────────────────────────────────────┘
-   ↑
-   點擊 → 上拉 popover：
-   ┌─────────────────────────────────┐
-   │ 選擇表單                         │
-   │ ┌───────────────────────────┐   │
-   │ │ 動員開工作業檢核表         │   │
-   │ │ [⬇下載空白檔] [✨AI 代填]  │   │
-   │ └───────────────────────────┘   │
-   │ ... (其他兩份)                   │
-   └─────────────────────────────────┘
-
-   點 AI 代填 → 內嵌確認檢視（不彈系統 confirm）
-   點「開始填寫」→ onSendMessage(`我要填《X》`) → unified_intent 判 static_form_fill
-```
-
-特色：
-- 點擊外面 / Esc 關閉
-- 第一次開啟才 fetch `/api/forms`，之後快取
-- popover 視覺沿用既有 design system（rounded-xl / border-zinc-200 / shadow-lg）
-
-### 訊息氣泡（MessageBubble）
-
-```
-AI 訊息排列：
-1. FormLoadingCard       ← form_loading 事件後（動態表單生成中骨架）
-2. FormPreview + Export   ← form 事件後（動態表單預覽 + Excel 匯出）
-3. 回覆文字（串流 cursor）
-4. SourcesPanel           ← 串流結束後
-5. FormFileCard 列         ← form_files 事件（靜態表下載 / 已填寫下載）
-```
-
-### CSS 細節
-
-- Tailwind v4 preflight 移除了 button 預設 `cursor: pointer`，全域加回：
-  ```css
-  button:not(:disabled):not([aria-disabled="true"]),
-  [role="button"]:not([aria-disabled="true"]) {
-    cursor: pointer !important;
-  }
-  ```
-- RWD：電腦版固定 sidebar、聊天區 max-w-3xl 置中；手機版 overlay sidebar + 漢堡按鈕
-
----
-
-## 可觀測性與維運
 
 ### LangSmith Tracing
 
@@ -811,205 +497,17 @@ LANGCHAIN_API_KEY=lsv2_pt_...
 LANGCHAIN_PROJECT=LangGraph-RAG
 ```
 
-可觀察：每節點時間 / token、unified_intent 三段 log（INPUT / LLM / STATE）、CRAG 重試與 query 改寫、form_structurer Function Calling 輸出、form_fill_collector 抽取結果（含 skip / user_done）。
-
-### Orphan 清理腳本
-
-[`backend/scripts/cleanup_orphan_forms.py`](backend/scripts/cleanup_orphan_forms.py)：對照 app.db 的 conversations，清掉：
-- generated_forms 內 prefix 對不到任何 conversation 的 .docx
-- langgraph.db 內 thread_id 對不到 conversation 的 checkpoints/writes
-
-```bash
-# 預設 dry-run 列出 orphan
-python scripts/cleanup_orphan_forms.py
-
-# 確認後實際刪除
-python scripts/cleanup_orphan_forms.py --apply
-```
-
-> 一般情況下不需要跑此腳本：`delete_conversation` 已自動清理。此腳本用於：(a) 升級前留下的 orphan，(b) 直接 SQL 刪 conversation 沒走 service 層的場景。
-
-### 表單 schema 重建
-
-新增表時：
-
-1. 把 .docx 放進 `data_markdown/form_data/`
-2. 在 `app/rag/form_registry.json` 加一筆（form_id / display_name / file_name / keywords）
-3. 用 `python scripts/inspect_form.py <檔名.docx>` dump 真實結構，確認複雜度
-4. **簡單規律的檢核表** → 跑 `python scripts/build_form_schemas.py` 自動產 schema JSON
-5. **複雜結構（多附件 / 跨頁 / cell-marker）** → 仿 `build_010315_schema.py` 寫專用產生器，schema 標 `"manual": true`，再用 `verify_010315_schema.py` 模式驗證 marker 命中
-6. 必要時手動校對 schema 的 sub_label / section
-7. 重啟後端
-
-前端 `FormPickerButton` 自動列出新表，無需改前端。
+每個 node 的 input / output / latency / token / cost 都會自動上 [LangSmith](https://smith.langchain.com)。RAG 的 `unified_intent` 三段 log (INPUT / LLM / STATE) 跟 SEARCH 的所有 OpenAI call (LangSmith.wrap_openai) 都會出現。
 
 ---
 
-## 專案結構
+## 延伸閱讀
 
-```
-backend/app/
-├── api/
-│   ├── auth.py                # 註冊 / 登入 / refresh / logout
-│   ├── chat.py                # SSE 串流
-│   ├── conversations.py       # CRUD（DEL 連動清理）
-│   └── export.py              # Excel 匯出
-├── core/
-│   ├── security.py            # JWT 簽發/驗證、bcrypt
-│   └── dependencies.py        # get_current_user
-├── graph/
-│   ├── builder.py             # StateGraph 組裝、條件邊
-│   ├── state.py               # GraphState TypedDict
-│   └── nodes/
-│       ├── compact.py         # compact_check, summarizer
-│       ├── unified_intent.py  # 純 LLM 意圖分類（6 intent + post-normalization + 三段 log）
-│       ├── retrieval.py       # Hybrid RAG retriever
-│       ├── context.py         # context_builder
-│       ├── grader.py          # CRAG retrieval_grader / query_rewriter
-│       ├── form.py            # 動態表單 form_structurer
-│       ├── form_fill.py       # 靜態表填寫三節點 + section 分組 / select_next_group / skip 純函式
-│       ├── form_exporter.py   # 動態表單匯出 xlsx / csv（不打 LLM）
-│       ├── source_filter.py   # 並行來源評估
-│       └── generation.py      # responder（依 intent + status 切換 system prompt）
-├── models/                    # User / Conversation / Message / Summary
-├── rag/
-│   ├── vector_store.py        # ChromaDB（async 包裝）
-│   ├── retriever.py           # Hybrid + intra/inter-query RRF
-│   ├── form_registry.json     # 靜態表 registry
-│   ├── form_lookup.py         # 候選召回 + list_all_forms / get_form_meta
-│   ├── form_schemas/
-│   │   ├── 010101.json
-│   │   ├── 010102.json
-│   │   └── 010315.json
-│   └── jieba_dict.txt         # 4,948 個營造業自訂詞典
-├── services/
-│   ├── conversation_service.py  # CRUD + summary + cleanup hooks
-│   └── form_fill_writer.py    # write_filled_docx / load_schema /
-│                              # delete_generated_for_conversation
-├── config.py
-├── database.py
-└── main.py                    # 含 /api/forms* 端點 + token 所屬權驗證
-
-backend/scripts/
-├── 01_preprocess.py … 07      # 知識庫向量索引 pipeline
-├── build_form_schemas.py      # 通用：從 .docx 自動產欄位 schema（manual schema 會 skip）
-├── build_010315_schema.py     # 010315 專用手寫 schema 產生器（含 4 附件 / cell_marker / 跨頁）
-├── inspect_form.py            # dump .docx 真實 paragraph / table / cell 結構（除錯用）
-├── verify_010315_schema.py    # 驗證每個 marker / cell loc 在 docx 中找得到
-└── cleanup_orphan_forms.py    # orphan 清理（dry-run / --apply）
-
-frontend/
-├── app/(app)/
-│   ├── layout.tsx
-│   ├── new/page.tsx
-│   └── chat/[conversationId]/page.tsx
-├── components/
-│   ├── chat/
-│   │   ├── InputBar.tsx
-│   │   ├── FormPickerButton.tsx       # 上拉選單 + 內嵌確認
-│   │   ├── FormFileCard.tsx
-│   │   ├── MessageBubble.tsx
-│   │   ├── MessageList.tsx
-│   │   └── SourcesPanel.tsx
-│   ├── form/
-│   │   ├── FormPreview.tsx
-│   │   └── ExportButton.tsx
-│   ├── layout/Sidebar.tsx
-│   └── ui/                            # shadcn/base-ui
-├── lib/
-│   ├── api.ts                         # axios + interceptor refresh
-│   ├── sse.ts                         # SSE 解析
-│   └── auth.ts
-└── store/
-    ├── authStore.ts
-    └── chatStore.ts
-```
-
----
-
-## 環境設定與啟動
-
-### 環境變數（`.env`）
-
-```env
-# OpenAI
-OPENAI_API_KEY=sk-...
-LLM_MODEL=gpt-5.4
-GRADER_MODEL=gpt-5.4              # unified_intent / retrieval_grader / query_rewriter / form_fill_collector / source_filter
-FORM_MODEL=gpt-5.4                # form_structurer
-EMBEDDING_MODEL=text-embedding-3-small
-
-# Database
-DATABASE_URL=sqlite+aiosqlite:///./app.db
-SYNC_DATABASE_URL=sqlite:///./app.db
-LANGGRAPH_DB_PATH=./langgraph.db
-
-# JWT
-SECRET_KEY=your-secret-here
-ACCESS_TOKEN_EXPIRE_MINUTES=120
-REFRESH_TOKEN_EXPIRE_DAYS=7
-
-# ChromaDB
-CHROMA_PERSIST_PATH=./chroma_db
-CHROMA_VERSIONS_PATH=./chroma_versions
-CHROMA_ACTIVE_VERSION=v1          # 留空 = 用 CHROMA_PERSIST_PATH
-
-# App
-APP_ENV=development
-CORS_ORIGINS=http://localhost:3000
-
-# LangSmith（可選）
-LANGCHAIN_TRACING_V2=true
-LANGCHAIN_API_KEY=lsv2_pt_...
-LANGCHAIN_PROJECT=LangGraph-RAG
-```
-
-### 模型分工
-
-| 設定 | 用途 |
+| 文件 | 內容 |
 |---|---|
-| `LLM_MODEL` | 回覆生成、對話摘要、responder 完整 RAG 回應 |
-| `GRADER_MODEL` | unified_intent、CRAG grader/rewriter、form_fill_collector、source_filter |
-| `FORM_MODEL` | form_structurer（動態表單） |
-
-### 啟動
-
-```bash
-# 後端
-cd backend
-uv sync
-uv run alembic upgrade head
-uv run uvicorn app.main:app --reload --port 8000
-
-# 前端
-cd frontend
-npm install
-npm run dev
-```
-
-### 知識庫建置
-
-```bash
-cd backend
-# 1. Markdown → 預處理
-uv run python scripts/01_preprocess.py
-# 2. chunking
-uv run python scripts/02_chunk.py
-# 3-4. 產生 / 校對 metadata
-uv run python scripts/03_generate_meta.py
-# 5. 向量化並寫入 ChromaDB
-uv run python scripts/05_embed_ingest.py
-# 6. 驗證
-uv run python scripts/06_verify.py
-```
-
-### 表單 schema 建置
-
-```bash
-cd backend
-uv run python scripts/build_form_schemas.py
-```
-
-產出：
-- `app/rag/form_schemas/{form_id}.json`（每張表的欄位 schema）
-- `scripts/output/form_schemas_summary.txt`（人類可讀清單）
+| [SETUP.md](SETUP.md) | 從零 clone 到跑起來的完整步驟 |
+| [agent_flow.md](agent_flow.md) | RAG LangGraph 流程 mermaid + 每節點 system prompt 摘要 |
+| [SEARCH_INTEGRATION_PLAN.md](SEARCH_INTEGRATION_PLAN.md) | SEARCH 模組從獨立 repo 整合進來的完整計畫 + post-mortem（cascade-delete + WAL）|
+| [DEPLOY.md](DEPLOY.md) | Docker 容器化部署的歷史方案 (現在用 PM2 直跑、保留供參考) |
+| [PLAN.md](PLAN.md) | RAG 系統原始計畫書 |
+| `system.md` (worktree internal) | LangGraph node 設計筆記 (尚未 commit) |
