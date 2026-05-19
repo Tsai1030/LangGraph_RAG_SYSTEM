@@ -58,7 +58,7 @@ REM         (Caddy must NOT start before these ports are open,
 REM          otherwise it can cache failure and keep returning 502)
 REM ========================================================
 echo [2/4] Waiting for backend:8000 and frontend:3000 to be ready...
-powershell -NoProfile -Command "$deadline=(Get-Date).AddSeconds(90); $ok=$false; while ((Get-Date) -lt $deadline) { $b = (Get-NetTCPConnection -State Listen -LocalPort 8000 -ErrorAction SilentlyContinue) -ne $null; $f = (Get-NetTCPConnection -State Listen -LocalPort 3000 -ErrorAction SilentlyContinue) -ne $null; if ($b -and $f) { Write-Host '  Ready: 8000 + 3000 listening' -ForegroundColor Green; $ok=$true; break }; Start-Sleep -Seconds 1 }; if (-not $ok) { Write-Host ('  TIMEOUT after 90s  (8000=' + $b + ' 3000=' + $f + ')') -ForegroundColor Yellow; exit 1 }"
+powershell -NoProfile -Command "$deadline=(Get-Date).AddSeconds(90); $ok=$false; while ((Get-Date) -lt $deadline) { $ns = (netstat -ano | Out-String); $b = $ns -match ':8000\s+0\.0\.0\.0:0\s+LISTENING'; $f = $ns -match ':3000\s+0\.0\.0\.0:0\s+LISTENING'; if ($b -and $f) { Write-Host '  Ready: 8000 + 3000 listening' -ForegroundColor Green; $ok=$true; break }; Start-Sleep -Seconds 1 }; if (-not $ok) { Write-Host ('  TIMEOUT after 90s  (8000=' + $b + ' 3000=' + $f + ')') -ForegroundColor Yellow; exit 1 }"
 if %errorLevel% NEQ 0 (
     echo [WARN] Ports did not come up in time; Caddy will serve 502 until they do.
     echo        Check: pm2 logs backend --err   /   pm2 logs frontend --err
@@ -66,27 +66,22 @@ if %errorLevel% NEQ 0 (
 echo.
 
 REM ========================================================
-REM  3/4 - Caddy: stop any old instance, then start fresh
-REM         (avoids stale connection state if Caddy was running
-REM          while upstreams were down)
+REM  3/4 - Ensure Caddy is NOT running
+REM         (COMODO EDR blocks caddy.exe -> node.exe on this
+REM          machine; we proxy /api via Next.js rewrites instead)
 REM ========================================================
-echo [3/4] Restarting Caddy...
-REM Graceful stop via admin API (no error if Caddy is not running)
+echo [3/4] Stopping any leftover Caddy...
 powershell -NoProfile -Command "try { Invoke-WebRequest -Uri 'http://localhost:2019/stop' -Method POST -UseBasicParsing -TimeoutSec 3 | Out-Null } catch {}" >nul 2>&1
-REM Belt-and-suspenders kill in case admin API was unreachable
 taskkill /F /IM caddy.exe >nul 2>&1
-timeout /t 1 /nobreak >nul
-start "Caddy" /MIN cmd /c "cd /d C:\caddy && caddy.exe run --config C:\caddy\Caddyfile"
-echo   Caddy launched in minimized window. Do NOT close it.
-REM Wait for 9000 to bind
-powershell -NoProfile -Command "$deadline=(Get-Date).AddSeconds(15); $ok=$false; while ((Get-Date) -lt $deadline) { if (Get-NetTCPConnection -State Listen -LocalPort 9000 -ErrorAction SilentlyContinue) { Write-Host '  Caddy listening on :9000' -ForegroundColor Green; $ok=$true; break }; Start-Sleep -Seconds 1 }; if (-not $ok) { Write-Host '  Caddy did not bind :9000 within 15s' -ForegroundColor Yellow; exit 1 }"
 echo.
 
 REM ========================================================
-REM  4/4 - Tailscale Funnel
+REM  4/4 - Tailscale Funnel directly to frontend :3000
+REM         Next.js handles /api/* itself via next.config.ts rewrites
 REM ========================================================
-echo [4/4] Configuring Tailscale Funnel (port 9000)...
-tailscale funnel --bg 9000
+echo [4/4] Configuring Tailscale Funnel (port 3000)...
+tailscale funnel reset >nul 2>&1
+tailscale funnel --bg 3000
 if %errorLevel% NEQ 0 (
     echo [WARN] Tailscale funnel may have failed.
 )
