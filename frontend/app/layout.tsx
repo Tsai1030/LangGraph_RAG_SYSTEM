@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, Instrument_Serif, JetBrains_Mono } from "next/font/google";
+import { Geist, Geist_Mono, Instrument_Serif, JetBrains_Mono, Noto_Serif_TC } from "next/font/google";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import "./globals.css";
 
@@ -16,6 +16,13 @@ const jetbrainsMono = JetBrains_Mono({
   subsets: ["latin"],
   weight: ["400", "500"],
 });
+// Traditional Chinese editorial serif — used on the sidebar brand title.
+// Google Fonts serves CJK via unicode-range so only the actual glyphs
+// we render get downloaded; bundle impact stays modest.
+const notoSerifTC = Noto_Serif_TC({
+  variable: "--font-serif-tc",
+  weight: ["500", "700"],
+});
 
 export const metadata: Metadata = {
   title: "營造知識助理",
@@ -24,7 +31,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="zh-TW" className={`${geistSans.variable} ${geistMono.variable} ${instrumentSerif.variable} ${jetbrainsMono.variable} h-full`}>
+    <html lang="zh-TW" className={`${geistSans.variable} ${geistMono.variable} ${instrumentSerif.variable} ${jetbrainsMono.variable} ${notoSerifTC.variable} h-full`}>
       <body className="min-h-full flex flex-col antialiased">
         <TooltipProvider delay={400}>
           {children}

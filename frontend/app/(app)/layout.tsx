@@ -78,7 +78,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         className="hidden md:flex shrink-0 flex-col overflow-hidden"
         style={{
           background: "#09090b",
-          width: collapsed ? "56px" : "256px",
+          width: collapsed ? "48px" : "288px",
           transition: "width 0.25s cubic-bezier(0.4, 0, 0.2, 1)",
         }}
       >
@@ -96,7 +96,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           {/* Sidebar panel slides in from left */}
           <div
             className="fixed left-0 top-0 bottom-0 z-50 flex flex-col overflow-hidden"
-            style={{ width: "256px", background: "#09090b" }}
+            style={{ width: "288px", background: "#09090b" }}
           >
             <Sidebar
               collapsed={false}

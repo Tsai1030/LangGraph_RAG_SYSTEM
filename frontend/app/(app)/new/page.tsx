@@ -13,7 +13,7 @@ const SUGGESTIONS = [
   { q: "工地施工動線規劃", icon: Route },
   { q: "採購發包的金額分級", icon: Receipt },
   { q: "安全衛生管理規定", icon: ShieldCheck },
-  { q: "工務所辦公室設置", icon: Building2 },
+  { q: "工務所辦公室設置說明", icon: Building2 },
 ];
 
 export default function NewPage() {

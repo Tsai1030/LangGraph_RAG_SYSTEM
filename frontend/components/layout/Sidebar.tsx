@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Image from "next/image";
-import { Plus, Trash2, LogOut, Pencil, X, PanelLeft, MessageSquare, MoreHorizontal, HelpCircle, ChevronUp, ChevronDown, Shield, BarChart3 } from "lucide-react";
+import { Plus, Trash2, LogOut, Pencil, X, PanelLeft, MoreVertical, HelpCircle, ChevronUp, ChevronDown, ChevronRight, Shield, BarChart3, ArrowUpRight } from "lucide-react";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
@@ -18,20 +18,6 @@ interface Props {
   collapsed: boolean;
   onToggle: () => void;
   onMobileClose?: () => void;
-}
-
-function timeAgo(iso: string): string {
-  // SQLite 回傳的 datetime 不帶 timezone，補 Z 確保 JS 以 UTC 解析
-  const normalized = /[Zz+]/.test(iso) ? iso : iso + "Z";
-  const diff = Date.now() - new Date(normalized).getTime();
-  const m = Math.floor(diff / 60000);
-  if (m < 1) return "剛剛";
-  if (m < 60) return `${m} 分鐘前`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h} 小時前`;
-  const d = Math.floor(h / 24);
-  if (d < 30) return `${d} 天前`;
-  return new Date(iso).toLocaleDateString("zh-TW");
 }
 
 export default function Sidebar({ collapsed, onToggle, onMobileClose }: Props) {
@@ -51,6 +37,11 @@ export default function Sidebar({ collapsed, onToggle, onMobileClose }: Props) {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [userMenuPos, setUserMenuPos] = useState<{ top: number; left: number } | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
+  // Recents collapsible section. When closed, the conversation list is
+  // hidden behind the "Recents" header. State lives at sidebar level
+  // (not persisted) — refresh resets to open, which is usually what
+  // users expect from this kind of light disclosure UI.
+  const [recentsOpen, setRecentsOpen] = useState(true);
   const navRef = useRef<HTMLElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
@@ -202,9 +193,14 @@ export default function Sidebar({ collapsed, onToggle, onMobileClose }: Props) {
               className="shrink-0 rounded-md overflow-hidden hover:opacity-80 transition-opacity cursor-pointer"
               title="回到新對話"
             >
-              <Image src="/logo1.png" alt="營造知識助理" width={24} height={24} className="size-6 object-contain" />
+              <Image src="/logo1.png" alt="營造知識助理" width={32} height={32} className="size-8 object-contain" />
             </button>
-            <span className="text-zinc-100 font-medium text-sm truncate">營造知識助理</span>
+            <span
+              className="text-zinc-100 font-bold text-[18px] tracking-wide truncate"
+              style={{ fontFamily: "var(--font-serif-tc), 'Noto Serif TC', serif" }}
+            >
+              營造知識助理
+            </span>
           </div>
         )}
         {onMobileClose ? (
@@ -242,7 +238,7 @@ export default function Sidebar({ collapsed, onToggle, onMobileClose }: Props) {
               render={
                 <button
                   onClick={handleNew}
-                  className="w-full flex items-center justify-center size-8 rounded-md text-zinc-500 hover:text-zinc-100 hover:bg-zinc-800 transition-colors mx-auto"
+                  className="w-full flex items-center justify-center size-8 rounded-md text-zinc-200 hover:text-white hover:bg-zinc-800 transition-colors mx-auto"
                 />
               }
             >
@@ -253,9 +249,12 @@ export default function Sidebar({ collapsed, onToggle, onMobileClose }: Props) {
         ) : (
           <button
             onClick={handleNew}
-            className="w-full flex items-center gap-2 px-2.5 h-8 rounded-md text-xs text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors"
+            className="w-full flex items-center gap-2.5 px-2.5 h-9 rounded-md text-[14px] text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors"
           >
-            <Plus size={14} className="shrink-0" />
+            {/* + with a soft circular badge around it */}
+            <span className="shrink-0 size-6 rounded-full bg-zinc-700/40 flex items-center justify-center">
+              <Plus size={14} />
+            </span>
             <span>新對話</span>
           </button>
         )}
@@ -273,7 +272,7 @@ export default function Sidebar({ collapsed, onToggle, onMobileClose }: Props) {
               render={
                 <button
                   onClick={() => router.push("/search/generate")}
-                  className="w-full flex items-center justify-center size-8 rounded-md text-zinc-500 hover:text-zinc-100 hover:bg-zinc-800 transition-colors mx-auto"
+                  className="w-full flex items-center justify-center size-8 rounded-md text-zinc-200 hover:text-white hover:bg-zinc-800 transition-colors mx-auto"
                 />
               }
             >
@@ -284,79 +283,90 @@ export default function Sidebar({ collapsed, onToggle, onMobileClose }: Props) {
         ) : (
           <button
             onClick={() => router.push("/search/generate")}
-            className="w-full flex items-center gap-2 px-2.5 h-8 rounded-md text-xs text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors"
+            className="group/search w-full flex items-center gap-2.5 px-2.5 h-9 rounded-md text-[14px] text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors"
           >
-            <BarChart3 size={14} className="shrink-0" />
-            <span>鋼筋盤價助理</span>
+            {/* Same size-6 box as 新對話's Plus badge so the text after
+                starts at the exact same horizontal offset on both rows. */}
+            <span className="shrink-0 size-6 flex items-center justify-center">
+              <BarChart3 size={18} />
+            </span>
+            <span className="flex-1 text-left">鋼筋盤價助理</span>
+            {/* hover-only affordance: bigger + bolder stroke than the
+                lucide default so the arrow reads as a deliberate accent. */}
+            <ArrowUpRight
+              size={18}
+              strokeWidth={2.25}
+              className="shrink-0 opacity-0 group-hover/search:opacity-100 transition-opacity"
+            />
           </button>
         )}
       </div>
 
-      {/* Conversation list */}
+      {/* Conversation list — "Recents" label + items live inside the
+          scroll container so they scroll as one block (unlike 新對話 /
+          鋼筋盤價助理 above which stay pinned at the top of the sidebar).
+
+          The header is a button: hover reveals a Hide/Show affordance,
+          click toggles whether the conversations are rendered.
+
+          When the whole sidebar is collapsed (icon-only mode) the whole
+          conversation block — header AND list — is hidden. Only the two
+          top-level pinned buttons (新對話 + 鋼筋盤價助理) remain. */}
       <nav ref={navRef} className="flex-1 overflow-y-auto px-2 pb-2 sidebar-scroll">
-        {!collapsed && conversations.length === 0 && (
-          <p className="text-center text-zinc-600 text-xs py-10">尚無對話紀錄</p>
-        )}
-        <div className="flex flex-col gap-0.5">
-          {conversations.map((conv) => {
-            const isActive = conv.id === activeId;
-
-            if (collapsed) {
-              return (
-                <Tooltip key={conv.id}>
-                  <TooltipTrigger
-                    render={
-                      <button
-                        onClick={() => router.push(`/chat/${conv.id}`)}
-                        className={cn(
-                          "w-full flex items-center justify-center h-8 rounded-md transition-colors",
-                          isActive ? "bg-zinc-800 text-zinc-100" : "hover:bg-zinc-800/60 text-zinc-500"
-                        )}
-                      />
-                    }
-                  >
-                    <MessageSquare size={13} />
-                  </TooltipTrigger>
-                  <TooltipContent side="right">{conv.title ?? "新對話"}</TooltipContent>
-                </Tooltip>
-              );
-            }
-
-            const isMenuOpen = menuOpenId === conv.id;
+        {!collapsed && (
+          <>
+            <button
+              type="button"
+              onClick={() => setRecentsOpen((o) => !o)}
+              className="group/recents w-full flex items-center justify-between px-2.5 pt-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-500 hover:text-zinc-300 transition-colors"
+            >
+              <span>Recents</span>
+              <span className="opacity-0 group-hover/recents:opacity-100 transition-opacity inline-flex items-center gap-1 text-[10px] normal-case tracking-normal font-medium text-zinc-400">
+                {recentsOpen ? "Hide" : "Show"}
+                {recentsOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+              </span>
+            </button>
+            {recentsOpen && conversations.length === 0 && (
+              <p className="text-center text-zinc-600 text-xs py-10">尚無對話紀錄</p>
+            )}
+            <div className={cn("flex flex-col gap-0.5", !recentsOpen && "hidden")}>
+              {conversations.map((conv) => {
+                const isActive = conv.id === activeId;
+                const isMenuOpen = menuOpenId === conv.id;
 
             return (
               <div
                 key={conv.id}
                 onClick={() => router.push(`/chat/${conv.id}`)}
                 className={cn(
-                  "group relative flex flex-col px-2.5 py-2 rounded-md cursor-pointer transition-colors",
+                  "group relative flex items-center px-2.5 h-9 rounded-md cursor-pointer transition-colors",
                   isActive ? "bg-zinc-800 text-zinc-100" : "hover:bg-zinc-800/60 text-zinc-400 hover:text-zinc-200"
                 )}
               >
-                <span className="text-[13px] font-medium truncate pr-12 leading-snug">
+                <span className="text-[14px] font-medium truncate pr-12 leading-snug">
                   {conv.title ?? "新對話"}
                 </span>
-                <span className="text-xs text-zinc-600 mt-0.5">
-                  {timeAgo(conv.updated_at)}
-                </span>
-                {/* 三個圓點按鈕：手機常駐顯示；桌機 hover 列才顯示，選單開啟時也顯示 */}
+                {/* 三個圓點按鈕（直排）：手機常駐顯示；桌機 hover 列才顯示，
+                    選單開啟時也顯示。hover 時 icon 跟底色都比平常亮一階。 */}
                 <button
                   onClick={(e) => openMenu(e, conv.id)}
                   aria-label="更多選項"
                   className={cn(
                     "absolute right-1.5 top-1/2 -translate-y-1/2",
                     "size-6 flex items-center justify-center rounded-md transition-colors",
-                    "text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700",
+                    "text-zinc-400 hover:text-zinc-50 hover:bg-zinc-600",
                     "md:opacity-0 md:group-hover:opacity-100",
                     isMenuOpen && "md:opacity-100"
                   )}
                 >
-                  <MoreHorizontal size={13} />
+                  <MoreVertical size={14} />
                 </button>
               </div>
             );
           })}
-        </div>
+            </div>
+          </>
+        )}
       </nav>
 
       <Separator className="bg-zinc-800/60" />

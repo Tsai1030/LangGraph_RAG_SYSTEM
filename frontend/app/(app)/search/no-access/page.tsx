@@ -25,7 +25,7 @@ export default function SearchNoAccessPage() {
           鋼筋盤價助理尚未開通
         </h1>
         <p className="mt-3 text-sm text-zinc-600 leading-relaxed">
-          此功能需要管理員授權後才能使用。請聯絡系統管理員，告知您的帳號 email，
+          此功能需要管理員授權後才能使用。請聯絡系統管理員 pijh102511@gmail.com，告知您的帳號 email，
           授權後重新整理本頁即可進入。
         </p>
         <button
