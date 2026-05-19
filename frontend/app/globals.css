@@ -87,6 +87,41 @@
     0 4px 12px -4px oklch(0% 0 0 / 0.08);
 }
 
+/* ─── SEARCH module animations ───
+   Ported from SEARCH/frontend/src/app/globals.css. Animation names are
+   global to the stylesheet, so we keep the original names; the SVG
+   paths in loading-overlay.tsx reference svg-draw-cycle / accent-pulse
+   verbatim and the loading window wrapper references .window-in.
+   Without these, paths render with stroke-dashoffset=100 and no
+   animation runs — the panel looks white because nothing is drawn. */
+
+/* Cmd-K-style window entry */
+@keyframes window-in {
+  from { opacity: 0; transform: scale(0.96) translateY(8px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+.window-in {
+  animation: window-in 220ms cubic-bezier(0.32, 0.72, 0.0, 1.0) both;
+}
+
+/* SVG draw-by-stroke for the loading illustration.
+   Each path declares its own --len (we set 100 in the component
+   matching pathLength="100"). stroke-dashoffset animates --len → 0
+   (drawing in), holds, then fades for cycle restart. */
+@keyframes svg-draw-cycle {
+  0%   { stroke-dashoffset: var(--len); opacity: 0;    }
+  10%  { opacity: 1; }
+  35%  { stroke-dashoffset: 0;          opacity: 1;    }   /* fully drawn */
+  85%  { stroke-dashoffset: 0;          opacity: 0.95; }   /* hold */
+  100% { stroke-dashoffset: 0;          opacity: 0;    }   /* fade for restart */
+}
+
+/* Accent dot pulse — driven on the status indicator. */
+@keyframes accent-pulse {
+  0%, 100% { transform: scale(1);    opacity: 0.85; }
+  50%      { transform: scale(1.12); opacity: 1;    }
+}
+
 @theme inline {
   --font-heading: var(--font-sans);
   --font-sans: var(--font-geist-sans);
