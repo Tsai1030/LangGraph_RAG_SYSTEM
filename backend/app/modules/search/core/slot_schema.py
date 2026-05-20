@@ -121,11 +121,27 @@ SLOTS: list[SlotDef] = [
         section="fengxing",
     ),
     SlotDef(
+        key="fx_sd280w_delta",
+        label="SD280W 漲跌",
+        type=SlotType.DELTA,
+        unit="元",
+        source=None,  # mirrors fx_sd280_delta (SD280W = SD280 + 200 constant)
+        section="fengxing",
+    ),
+    SlotDef(
         key="fx_sd420_price",
         label="豐興 SD420 盤價",
         type=SlotType.PRICE,
         unit="元/噸",
         source="fengxing",
+        section="fengxing",
+    ),
+    SlotDef(
+        key="fx_sd420_delta",
+        label="SD420 漲跌",
+        type=SlotType.DELTA,
+        unit="元",
+        source=None,  # mirrors fx_sd420w_delta (SD420 = SD420W parity)
         section="fengxing",
     ),
     SlotDef(

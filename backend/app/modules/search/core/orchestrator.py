@@ -138,6 +138,21 @@ async def _node_narrate(state: GenerationState) -> dict:
     # ── 5 + 6. history + CSC slots (need their own session) ──
     async with SearchAsyncSessionLocal() as db:
         await _fill_history_slots(slot_values, confidence, db, opening_monday(meeting_d))
+        # Mirror the current-week (h0) deltas from section 七 history into
+        # section 六.1's 4-row table. SD280W tracks SD280 (constant +200
+        # premium → same week-over-week change); SD420 tracks SD420W (parity).
+        _d280 = slot_values.get("hist_sd280_v_h0", "—")
+        _d280_conf = confidence.get("hist_sd280_v_h0", "low")
+        _d420 = slot_values.get("hist_sd420w_v_h0", "—")
+        _d420_conf = confidence.get("hist_sd420w_v_h0", "low")
+        for k, v, c in (
+            ("fx_sd280_delta",  _d280, _d280_conf),
+            ("fx_sd280w_delta", _d280, _d280_conf),
+            ("fx_sd420_delta",  _d420, _d420_conf),
+            ("fx_sd420w_delta", _d420, _d420_conf),
+        ):
+            slot_values[k] = v
+            confidence[k] = c
         await _fill_csc_slots(slot_values, confidence, db, state.get("csc_override"))
 
     return {"slot_values": slot_values, "confidence": confidence}
