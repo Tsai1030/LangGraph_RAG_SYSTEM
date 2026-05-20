@@ -2,7 +2,19 @@
 
 > 撰寫時間：2026-05-19
 > 目標機器：Windows 11，PM2 + uv + uvicorn + Next.js
-> 對應分支：`feat/tailscale-funnel-expose`（commit `c94337d` 是遷移前的最後快照）
+> 對應分支：`feat/tailscale-funnel-expose` → `feat/postgres-migration`（commit `c94337d` 是遷移前的最後快照）
+
+## ⚙️ 執行狀態（2026-05-20 更新）
+
+**🎉 MIGRATION COMPLETE** — 已成功遷移、生產運作中。
+
+- ✅ PG 13.23 安裝 + 3 個 database 建立完成（`kb_app` / `kb_search` / `kb_langgraph`）
+- ✅ Schema migration 全跑過（修一個 cross-dialect bug：`sa.text('0')` → `sa.false()`）
+- ✅ Data 搬遷成功且 counts 100% 對齊：14 users / 54 conv / 325 msg / 41 generation_runs / 70 price_history / 26 csc_price_state / 2 csc_meta
+- ✅ 端到端驗證（透過瀏覽器發訊息，PG 即時寫入 325 → 327）
+- ⚠️ 過程中踩到 3 個踩雷（見下方 §8 「Post-migration 觀察」）
+
+完成於 commit `24baf59`（feat/postgres-migration）。SQLite 三個 .db 檔保留在原位作為 rollback 保險。
 
 ---
 
@@ -458,6 +470,96 @@ git commit -m "feat(db): migrate from SQLite to PostgreSQL"
 - [ ] 如果遇到 alembic 跑不過、要不要當下花時間修還是先退回 SQLite
 
 如果都 ✓，按 Step 1.1 開始。
+
+---
+
+## 8. Post-migration 觀察（實際執行中踩到的雷）
+
+> 這節是「執行完才知道」的部分，給未來重做或維護的人參考。
+
+### 8.1 Alembic `server_default=sa.text('0')` 在 PG 上炸
+
+第 4 個 migration（`6cd7a4c2bf6f_add_search_enabled_to_users.py`）的：
+```python
+sa.Column('search_enabled', sa.Boolean(), server_default=sa.text('0'))
+```
+SQLite 接受字面 `0` 當 BOOLEAN DEFAULT；PG 嚴格區分型別、會丟：
+```
+DatatypeMismatch: column "search_enabled" is of type boolean
+                  but default expression is of type integer
+```
+
+**修法**：`sa.text('0')` → `sa.false()`，SQLAlchemy 會 emit dialect-appropriate boolean literal。已 commit。
+
+### 8.2 `alembic/env.py` 的 PRAGMA 在 PG 會炸
+
+`set_pragmas` listener 對所有 connect event 跑 `PRAGMA journal_mode=WAL`。PG 沒 PRAGMA 語法、報錯。
+
+**修法**：listener 改成只在 SQLite URL 下註冊（已 commit）。
+
+### 8.3 `config.py` 的 `@property` 不會吃 env 變數
+
+最初的 `search_async_database_url` 是 `@property`，硬寫 `sqlite+aiosqlite://`。我曾用 `os.environ.get(...)` 試圖在 property 內動態覆寫——**沒用**，因為 pydantic-settings 把 .env 灌進 Settings 物件，不會塞回 `os.environ`。
+
+**修法**：改用真正的 Field（`search_database_url: str | None = None`），property 變成「先查 Field 再 fallback 到 SQLite path」。已 commit。
+
+### 8.4 Windows + psycopg + asyncio：ProactorEventLoop 不相容
+
+`langgraph-checkpoint-postgres` 底下用 psycopg v3。psycopg 在 Windows 的 default `ProactorEventLoop` 上**直接 refuse**：
+```
+psycopg.InterfaceError: Psycopg cannot use the 'ProactorEventLoop' to run in async mode
+```
+
+**修法**：把 event loop policy 切成 `WindowsSelectorEventLoopPolicy`。但**不能只在 main.py 頂端設**——uvicorn 在 import `app.main` 之前就已經建好 ProactorEventLoop 了。
+
+正確作法：寫一個 `run_server.py` entrypoint，**先設 policy 再 import uvicorn 並用 asyncio.run(server.serve())**：
+
+```python
+# backend/run_server.py
+import asyncio, sys
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+from uvicorn import Config, Server
+def main():
+    config = Config("app.main:app", host="0.0.0.0", port=8000, loop="asyncio")
+    asyncio.run(Server(config).serve())
+if __name__ == "__main__":
+    main()
+```
+
+然後 PM2/啟動腳本改成 `uv run python run_server.py`，**不要**直接 `uv run uvicorn app.main:app`。已 commit。
+
+### 8.5 ⚠️ COMODO EDR 擋 PM2-spawned python → :5432
+
+**最大踩雷**。PM2 啟動 backend 時，python → PG 連線 **間歇性**失敗於：
+```
+psycopg.OperationalError: connection failed: could not connect to server:
+  Permission denied (0x0000271D/10013)
+   Is the server running on host "127.0.0.1" and accepting TCP/IP on port 5432?
+```
+
+`0x271D = WSAEACCES (10013)`。同樣的 Windows ACL，跟之前 Caddy → Node 是同一回事。
+
+**差異點**：foreground 跑 `uv run python run_server.py` 正常；PM2 spawn 同一支腳本就被擋。原因是 **COMODO 基於父進程鏈做信任決策**：
+- Foreground：`cmd.exe (user session) → uv.exe → python.exe` → ✅ 放行
+- PM2：`pm2 node daemon → cmd.exe → uv.exe → python.exe` → ❌ 拒絕
+
+**已試過的修法**：
+1. ❌ COMODO Application Rules 手動加 python.exe 為 Trusted — **時好時壞**，不穩定
+2. ❌ PM2 改用 .venv python 直接 spawn（繞 uv）— 一樣被擋
+3. ✅ **採用：backend 用 foreground cmd 視窗跑**（`start-backend.bat`），PM2 只管 frontend
+
+`start-system.bat` / `exit-maintenance.bat` 都已調整成這個模式。
+
+> 長遠來看若想徹底解，可考慮：
+> - NSSM 包成 Windows Service（不同信任 context）
+> - 把 COMODO 改成不基於父進程鏈，或關閉 EDR 模組
+> - 換另一台沒 COMODO 的機器
+> 但這些都不是當下優先。
+
+### 8.6 .bat 檔不要用 Unicode box-drawing 字元
+
+第一版 `start-backend.bat` 用了 `─` (U+2500) 當分隔線，cmd 預設 codepage 950 (Big5) 讀到亂碼、把 REM 行當指令執行、`@echo off` 失效。**bat 檔請保持純 ASCII**（用 `===`、`---`、`***` 等）。已修。
 
 ---
 
