@@ -41,27 +41,39 @@ if %errorLevel% NEQ 0 (
 )
 
 REM ========================================================
-REM  1/4 - PM2: clean slate then start backend + frontend
-REM         (delete first to clear zombie entries from prior run)
+REM  1/4 - Backend: foreground cmd (NOT PM2)
+REM         Why: PM2-spawned python.exe hits COMODO EDR WSAEACCES
+REM         when connecting to PostgreSQL on :5432. The user's
+REM         interactive shell is COMODO-trusted; spawning backend
+REM         from a foreground cmd inherits that trust. Until COMODO
+REM         is reconfigured we keep this process tree.
 REM ========================================================
-echo [1/4] Resetting PM2 and starting backend + frontend...
-call pm2 delete all >nul 2>&1
-call pm2 start ecosystem.config.js
+echo [1/4] Stopping any old PM2 backend entry, then launching backend in new window...
+call pm2 delete backend >nul 2>&1
+start "Backend (FastAPI + PostgreSQL)" cmd /k "cd /d %~dp0 && start-backend.bat"
+echo   Backend launched in a new cmd window. Do NOT close it.
+echo.
+
+REM ========================================================
+REM  2/4 - Frontend via PM2 (no COMODO trouble with Next.js)
+REM ========================================================
+echo [2/4] Resetting + starting PM2 frontend...
+call pm2 delete frontend >nul 2>&1
+call pm2 start ecosystem.config.js --only frontend
 if %errorLevel% NEQ 0 (
-    echo [WARN] PM2 start may have failed; continuing.
+    echo [WARN] PM2 frontend start may have failed; continuing.
 )
 echo.
 
 REM ========================================================
-REM  2/4 - Wait until backend:8000 and frontend:3000 truly listen
-REM         (Caddy must NOT start before these ports are open,
-REM          otherwise it can cache failure and keep returning 502)
+REM  2.5 - Wait until backend:8000 and frontend:3000 truly listen
 REM ========================================================
-echo [2/4] Waiting for backend:8000 and frontend:3000 to be ready...
+echo Waiting for backend:8000 and frontend:3000 to be ready...
 powershell -NoProfile -Command "$deadline=(Get-Date).AddSeconds(90); $ok=$false; while ((Get-Date) -lt $deadline) { $ns = (netstat -ano | Out-String); $b = $ns -match ':8000\s+0\.0\.0\.0:0\s+LISTENING'; $f = $ns -match ':3000\s+0\.0\.0\.0:0\s+LISTENING'; if ($b -and $f) { Write-Host '  Ready: 8000 + 3000 listening' -ForegroundColor Green; $ok=$true; break }; Start-Sleep -Seconds 1 }; if (-not $ok) { Write-Host ('  TIMEOUT after 90s  (8000=' + $b + ' 3000=' + $f + ')') -ForegroundColor Yellow; exit 1 }"
 if %errorLevel% NEQ 0 (
-    echo [WARN] Ports did not come up in time; Caddy will serve 502 until they do.
-    echo        Check: pm2 logs backend --err   /   pm2 logs frontend --err
+    echo [WARN] Ports did not come up in time.
+    echo        Check the Backend cmd window for errors,
+    echo        and:  pm2 logs frontend --err
 )
 echo.
 
@@ -95,7 +107,7 @@ echo   Startup complete - service status
 echo ============================================
 echo.
 
-echo --- PM2 ---
+echo --- PM2 (frontend only — backend is in a separate cmd window) ---
 call pm2 list
 echo.
 
@@ -111,7 +123,9 @@ echo   https://kccc3798.tail138ec9.ts.net
 echo.
 echo ============================================
 echo.
-echo Background services keep running.
-echo Closing this window does NOT stop them.
+echo NOTE:
+echo   Backend runs in the separate 'Backend (FastAPI + PostgreSQL)'
+echo   cmd window. Closing THAT window stops the backend.
+echo   Closing THIS window does NOT stop services.
 echo.
 pause

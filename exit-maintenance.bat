@@ -21,8 +21,11 @@ if %errorLevel% EQU 0 (
 echo   :3000 is free.
 echo.
 
-echo [2/2] Starting PM2 backend + frontend...
-call pm2 start backend
+echo [2/2] Starting backend (foreground cmd) and PM2 frontend...
+REM Backend runs in foreground cmd window so it inherits the user
+REM session's COMODO-trusted parent chain. PM2-spawned python.exe
+REM is intermittently blocked by COMODO when connecting to PG.
+start "Backend (FastAPI + PostgreSQL)" cmd /k "cd /d %~dp0 && start-backend.bat"
 call pm2 start frontend
 echo.
 
