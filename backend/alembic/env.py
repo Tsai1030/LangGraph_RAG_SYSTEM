@@ -43,13 +43,14 @@ def run_migrations_online() -> None:
         poolclass=pool.NullPool,
     )
 
-    # Enable WAL mode and foreign keys for SQLite
-    @event.listens_for(connectable, "connect")
-    def set_pragmas(dbapi_conn, _):
-        cursor = dbapi_conn.cursor()
-        cursor.execute("PRAGMA journal_mode=WAL")
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.close()
+    # Enable WAL mode and foreign keys — SQLite-only (PG has no PRAGMA)
+    if "sqlite" in settings.sync_database_url.lower():
+        @event.listens_for(connectable, "connect")
+        def set_pragmas(dbapi_conn, _):
+            cursor = dbapi_conn.cursor()
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
 
     with connectable.connect() as connection:
         context.configure(

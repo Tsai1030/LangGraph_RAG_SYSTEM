@@ -4,7 +4,7 @@ module.exports = {
       name: "backend",
       cwd: "C:/Users/226376/Desktop/data/backend",
       script: "uv",
-      args: "run uvicorn app.main:app --host 0.0.0.0 --port 8000",
+      args: "run python run_server.py",
       interpreter: "none",
     },
     {

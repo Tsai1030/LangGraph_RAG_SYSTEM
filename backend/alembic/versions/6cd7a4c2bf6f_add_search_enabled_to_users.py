@@ -38,9 +38,14 @@ def upgrade() -> None:
     supported this natively since 3.2 — column added in place, no
     other table touched, no cascade trigger.
 
-    server_default='0' is required to back-fill existing rows when
-    adding a NOT NULL boolean — without it ADD COLUMN would fail on any
-    DB that already has users.
+    server_default is required to back-fill existing rows when adding a
+    NOT NULL boolean — without it ADD COLUMN would fail on any DB that
+    already has users.
+
+    server_default=sa.false() emits the dialect-appropriate boolean literal:
+    'false' on PostgreSQL, '0' on SQLite (both back-fill rows to False).
+    Using sa.text('0') breaks on PostgreSQL ("type boolean but default
+    expression is of type integer").
     """
     op.add_column(
         'users',
@@ -48,7 +53,7 @@ def upgrade() -> None:
             'search_enabled',
             sa.Boolean(),
             nullable=False,
-            server_default=sa.text('0'),
+            server_default=sa.false(),
         ),
     )
 

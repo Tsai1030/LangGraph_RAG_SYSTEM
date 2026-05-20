@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     database_url: str
     sync_database_url: str
     langgraph_db_path: str = "./langgraph.db"
+    # If set (e.g. via env LANGGRAPH_DB_URL), use AsyncPostgresSaver
+    # instead of AsyncSqliteSaver. Format:
+    #   postgresql://user:pass@host:port/dbname
+    langgraph_db_url: str | None = None
 
     # JWT
     secret_key: str
@@ -60,6 +64,9 @@ class Settings(BaseSettings):
     # generation_runs). Users table stays in app.db — SEARCH references
     # users only by UUID string (no cross-DB FK).
     search_db_path: str = "./search.db"
+    # If set (e.g. via env SEARCH_DATABASE_URL), overrides search_db_path
+    # — used after PG migration.
+    search_database_url: str | None = None
     # Template + output paths. Both relative to backend/ at runtime (cwd
     # when uvicorn starts). Kept as strings here, resolved to absolute
     # Path objects in the orchestrator so the template is independent of
@@ -78,11 +85,16 @@ class Settings(BaseSettings):
 
     @property
     def search_async_database_url(self) -> str:
-        """SQLAlchemy URL for the SEARCH-only SQLite (aiosqlite driver).
+        """SQLAlchemy URL for the SEARCH database.
 
-        Mirrors database_url's form so the engine factory in
-        search_database.py can apply the same WAL pragmas / connect_args.
+        Precedence:
+            1. field search_database_url (set via env SEARCH_DATABASE_URL
+               or .env line of the same name; pydantic-settings reads
+               this at Settings init)
+            2. fallback: build SQLite URL from search_db_path (legacy)
         """
+        if self.search_database_url:
+            return self.search_database_url
         path = self.search_db_path.lstrip("./").lstrip(".\\")
         return f"sqlite+aiosqlite:///{path}"
 

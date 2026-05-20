@@ -2,7 +2,15 @@ import logging
 import mimetypes
 import os
 import re
+import sys
 from contextlib import asynccontextmanager
+
+# Windows-only: psycopg (used by langgraph-checkpoint-postgres) cannot
+# run on the default ProactorEventLoop. Must be set BEFORE asyncio/
+# uvicorn create the loop, so do it at the very top of main.py.
+if sys.platform == "win32":
+    import asyncio
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 _app_logger = logging.getLogger("app")
 _app_logger.setLevel(logging.INFO)
@@ -79,22 +87,41 @@ async def _bootstrap_initial_admin() -> None:
 
 
 @asynccontextmanager
+async def _make_checkpointer():
+    """Yield a LangGraph checkpointer appropriate for the configured backend.
+
+    Precedence:
+        1. settings.langgraph_db_url  → AsyncPostgresSaver  (post-migration)
+        2. else                       → AsyncSqliteSaver    (legacy fallback)
+    """
+    if settings.langgraph_db_url:
+        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+        async with AsyncPostgresSaver.from_conn_string(settings.langgraph_db_url) as cp:
+            yield cp
+    else:
+        async with aiosqlite.connect(settings.langgraph_db_path) as conn:
+            yield AsyncSqliteSaver(conn)
+
+
+@asynccontextmanager
 async def lifespan(app: FastAPI):
     """
     應用程式生命週期管理：
-    - Startup：開啟 aiosqlite 連線，初始化 AsyncSqliteSaver，編譯 LangGraph，bootstrap admin
-    - Shutdown：aiosqlite 連線由 context manager 自動關閉
+    - Startup：建立 LangGraph checkpointer (PG or SQLite based on env)，
+      編譯 graph，bootstrap admin
+    - Shutdown：context manager 自動關閉 checkpointer / DB 連線
     """
-    # aiosqlite connection 維持整個 server 生命週期
-    async with aiosqlite.connect(settings.langgraph_db_path) as conn:
-        checkpointer = AsyncSqliteSaver(conn)
-        await checkpointer.setup()                   # 建立 langgraph.db 所需 tables
+    async with _make_checkpointer() as checkpointer:
+        await checkpointer.setup()                   # 建立 checkpointer 所需 tables
         app.state.graph = build_graph(checkpointer=checkpointer)
         app.state.checkpointer = checkpointer        # 供 conversation 刪除時清 thread state
 
         print(f"[Startup] APP_ENV={settings.app_env}")
         print(f"[Startup] DATABASE_URL={settings.database_url}")
-        print(f"[Startup] LANGGRAPH_DB_PATH={settings.langgraph_db_path}")
+        if settings.langgraph_db_url:
+            print(f"[Startup] LANGGRAPH backend = PostgreSQL ({settings.langgraph_db_url.split('@')[-1]})")
+        else:
+            print(f"[Startup] LANGGRAPH backend = SQLite ({settings.langgraph_db_path})")
         print(f"[Startup] CHROMA_ACTIVE_VERSION={settings.chroma_active_version or '(default)'}")
         print(f"[Startup] RESOLVED_CHROMA_PATH={_resolve_chroma_path()}")
         print(f"[Startup] LLM_MODEL={settings.llm_model}")
