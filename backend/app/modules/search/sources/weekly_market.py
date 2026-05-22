@@ -29,13 +29,6 @@ _INTL_SCRAP_EXAMPLE = (
     "日本 2H 廢鋼本週持平為 385 美元/噸，"
     "澳洲鐵礦上漲 0.70 元至 109.75 美元/噸。"
 )
-_CHINA_XIBEN_EXAMPLE = (
-    "西本新幹線本週鋼材指數下跌 10 元至 3,500 元人民幣/噸(約 NT$15,894 元)，"
-    "鐵礦砂本週持平指數為 980 元人民幣/噸(約 NT$4,450 元)，"
-    "焦炭本週持平指數為 1,330 元人民幣/噸(約 NT$6,040 元)，"
-    "廢鋼下跌 10 元至 2,040 元人民幣/噸(約 NT$9,264 元)，"
-    "鋼胚上漲 20 元至 3040 元人民幣/噸(約 NT$13,805 元)。"
-)
 _LME_COPPER_EXAMPLE = (
     "上週 115/4/24 收盤價 13,246.81 美元/噸，"
     "115/5/1 收盤價 12,916.40 美元/噸(當週下跌 330.41 美元/噸)。"
@@ -123,7 +116,6 @@ class WeeklyMarketAdapter(SourceAdapter):
     name = "weekly_market"
     provides = [
         "intl_scrap_paragraph",
-        "china_xiben_paragraph",
         "lme_copper_paragraph",
         "intl_jp2h_scrap_price",
         "intl_us_container_scrap_price",
@@ -203,20 +195,6 @@ class WeeklyMarketAdapter(SourceAdapter):
                 "example": _INTL_SCRAP_EXAMPLE,
                 "extra": "說明：若美國大船廢鋼確實無報價，沿用「美國大船廢鋼無報價」字樣。",
             }]),
-            {
-                "slot": "china_xiben_paragraph",
-                "topic": "中國大陸西本新幹線指數",
-                "queries": [
-                    f"西本新幹線 鋼材指數 鐵礦砂 焦炭 廢鋼 鋼胚 {target_date.year}年{target_date.month}月",
-                    f"96369 西本 指數 人民幣 {target_date.year}-{target_date.month:02d}",
-                    f"Mysteel 大陸 鐵礦砂 焦炭 廢鋼 鋼胚 人民幣/噸 {target_date.year}年{target_date.month}月",
-                ],
-                "example": _CHINA_XIBEN_EXAMPLE,
-                "extra": (
-                    "NT$ 換算：用本週實際人民幣→新台幣匯率乘以指數，取整數。"
-                    "若不確定匯率，括號 NT$ 部分整體省略，不要寫 0。"
-                ),
-            },
             {
                 "slot": "lme_copper_paragraph",
                 "topic": "LME 倫敦銅現貨收盤價",

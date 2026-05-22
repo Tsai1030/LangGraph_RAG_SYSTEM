@@ -11,4 +11,4 @@ the package's sources/__init__.py only re-exports the base, so a bare
 `import .sources` does NOT cascade.
 """
 
-from .sources import fengxing, fengxing_finder, market_narrator, weekly_market  # noqa: F401
+from .sources import fengxing, fengxing_finder, market_narrator, weekly_market, xiben  # noqa: F401

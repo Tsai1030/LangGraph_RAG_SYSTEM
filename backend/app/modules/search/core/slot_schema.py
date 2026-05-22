@@ -238,7 +238,7 @@ SLOTS: list[SlotDef] = [
         key="china_xiben_paragraph",
         label="六.3 大陸西本指數",
         type=SlotType.TEXT,
-        source="weekly_market",
+        source="xiben",
         section="market_open",
     ),
     SlotDef(

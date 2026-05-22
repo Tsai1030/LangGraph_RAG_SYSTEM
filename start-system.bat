@@ -107,7 +107,7 @@ echo   Startup complete - service status
 echo ============================================
 echo.
 
-echo --- PM2 (frontend only — backend is in a separate cmd window) ---
+echo --- PM2 (frontend only -- backend is in a separate cmd window) ---
 call pm2 list
 echo.
 

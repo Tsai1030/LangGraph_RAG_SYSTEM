@@ -78,6 +78,10 @@ class Settings(BaseSettings):
     steelnet_user: str = ""
     steelnet_password: str = ""
     steelnet_base: str = "https://www.steelnet.com.tw"
+    # 西本新幹線（steelx2.com）人民幣→新台幣換算比率，用於 §六.3 大陸方面段落
+    # 的 NT$ 括號數字。範例 PDF 用的 ratio = 4.541；要更貼合實際匯率可改 .env
+    # CNY_TO_TWD_RATE。
+    cny_to_twd_rate: float = 4.541
 
     @property
     def cors_origins_list(self) -> list[str]:
