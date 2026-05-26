@@ -47,6 +47,16 @@ class Settings(BaseSettings):
     # Admin Bootstrap
     initial_admin_email: str = ""
 
+    # ─── Google OAuth ───
+    # Web Application Client ID（從 Google Cloud Console → Credentials）。
+    # 不需要 client secret — GIS ID-token flow 由前端拿 token、後端只負責驗證簽章。
+    google_client_id: str = ""
+    # 公司網域：只有此網域的 Google 帳號可登入/註冊。空字串 = 不限制（不建議用於 prod）。
+    allowed_email_domain: str = ""
+    # 是否允許新使用者用 email + 密碼註冊。false = 只能透過 Google 註冊。
+    # 既有密碼帳號不受影響（仍可用 /auth/login 登入）。
+    allow_password_register: bool = False
+
     # SMTP (for password reset email)
     smtp_host: str = ""
     smtp_port: int = 587

@@ -94,7 +94,8 @@ async def authenticate_user(
     result = await db.execute(select(User).where(User.email == email))
     user = result.scalar_one_or_none()
 
-    if not user or not verify_password(password, user.password_hash):
+    # password_hash 可能為 None（純 Google 註冊的帳號）— 視為沒有密碼登入能力
+    if not user or not user.password_hash or not verify_password(password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
     if not user.is_active:

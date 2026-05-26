@@ -4,8 +4,9 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Eye, EyeOff } from "lucide-react";
-import { login } from "@/lib/auth";
+import { login, loginWithGoogle } from "@/lib/auth";
 import AuthShell from "@/components/auth/AuthShell";
+import GoogleSignInButton from "@/components/auth/GoogleSignInButton";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -30,6 +31,24 @@ export default function LoginPage() {
         setError("此帳號已停用，請聯絡管理員");
       } else {
         setError("Email 或密碼錯誤，請重試");
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGoogleCredential = async (credential: string) => {
+    setError(null);
+    setLoading(true);
+    try {
+      await loginWithGoogle(credential);
+      router.replace("/new");
+    } catch (err: unknown) {
+      const resp = (err as { response?: { status?: number; data?: { detail?: string } } })?.response;
+      if (resp?.status === 403) {
+        setError(resp.data?.detail || "僅限公司 Google 帳號");
+      } else {
+        setError("Google 登入失敗，請稍後再試");
       }
     } finally {
       setLoading(false);
@@ -105,6 +124,19 @@ export default function LoginPage() {
           {loading && <span className="auth-spinner" />}
           {loading ? "登入中…" : <>登入 <span className="auth-btn-ink__arrow">→</span></>}
         </button>
+
+        <div className="auth-divider" aria-hidden>
+          <span>或</span>
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "center" }}>
+          <GoogleSignInButton
+            text="signin_with"
+            hostedDomain="bes.com.tw"
+            onCredential={handleGoogleCredential}
+            onError={() => setError("無法啟動 Google 登入，請檢查網路")}
+          />
+        </div>
 
         <p className="auth-form__hint">
           沒有帳號？

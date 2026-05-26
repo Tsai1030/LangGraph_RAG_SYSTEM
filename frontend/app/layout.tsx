@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Instrument_Serif, JetBrains_Mono, Noto_Serif_TC } from "next/font/google";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import GoogleAuthProvider from "@/components/providers/GoogleAuthProvider";
 import "./globals.css";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
@@ -33,9 +34,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="zh-TW" className={`${geistSans.variable} ${geistMono.variable} ${instrumentSerif.variable} ${jetbrainsMono.variable} ${notoSerifTC.variable} h-full`}>
       <body className="min-h-full flex flex-col antialiased">
-        <TooltipProvider delay={400}>
-          {children}
-        </TooltipProvider>
+        <GoogleAuthProvider>
+          <TooltipProvider delay={400}>
+            {children}
+          </TooltipProvider>
+        </GoogleAuthProvider>
       </body>
     </html>
   );

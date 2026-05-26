@@ -15,6 +15,7 @@ from app.models.user import User
 from app.schemas.auth import (
     ChangePasswordRequest,
     ForgotPasswordRequest,
+    GoogleAuthRequest,
     LoginRequest,
     RegisterRequest,
     ResetPasswordRequest,
@@ -28,6 +29,11 @@ from app.services.auth_service import (
     reset_password_with_token,
 )
 from app.services.email_service import send_password_reset_email
+from app.services.google_oauth_service import (
+    link_google_to_current_user,
+    login_or_register_with_google,
+    unlink_google_from_current_user,
+)
 from app.config import settings
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -56,11 +62,59 @@ async def register(
     response: Response,
     db: AsyncSession = Depends(get_db),
 ):
+    # Feature flag：新註冊預設關閉，新人只能走 Google
+    if not settings.allow_password_register:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="密碼註冊已關閉，請改用 Google 登入",
+        )
+    # 雙保險：即使開啟密碼註冊，也要擋非公司網域
+    allowed = settings.allowed_email_domain.strip().lower()
+    if allowed and not body.email.lower().endswith(f"@{allowed}"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"僅允許 @{allowed} 的公司帳號註冊",
+        )
     _, access_token, refresh_token = await register_user(
         db, body.email, body.password, body.display_name
     )
     _set_refresh_cookie(response, refresh_token)
     return TokenResponse(access_token=access_token)
+
+
+@router.post("/google", response_model=TokenResponse)
+@limiter.limit("10/minute")
+async def google_login(
+    request: Request,
+    body: GoogleAuthRequest,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+):
+    """Google 登入 / 註冊（同一個 endpoint）。
+    前端用 GIS 拿到 credential (ID token) 後丟過來即可。"""
+    _, access_token, refresh_token, _ = await login_or_register_with_google(db, body.credential)
+    _set_refresh_cookie(response, refresh_token)
+    return TokenResponse(access_token=access_token)
+
+
+@router.post("/google/link", response_model=UserOut)
+async def google_link(
+    body: GoogleAuthRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """已登入使用者將自己帳號綁定 Google。需登入態 + Google credential。"""
+    user = await link_google_to_current_user(db, current_user, body.credential)
+    return _build_user_out(user)
+
+
+@router.post("/google/unlink", response_model=UserOut)
+async def google_unlink(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    user = await unlink_google_from_current_user(db, current_user)
+    return _build_user_out(user)
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -185,6 +239,19 @@ async def reset_password(
     return TokenResponse(access_token=access_token)
 
 
+def _build_user_out(user: User) -> UserOut:
+    return UserOut(
+        id=str(user.id),
+        email=user.email,
+        display_name=user.display_name,
+        avatar_url=user.avatar_url,
+        role=user.role,
+        search_enabled=user.search_enabled,
+        has_password=user.password_hash is not None,
+        google_linked=user.google_sub is not None,
+    )
+
+
 @router.get("/me", response_model=UserOut)
 async def get_me(current_user: User = Depends(get_current_user)):
-    return UserOut.model_validate(current_user)
+    return _build_user_out(current_user)

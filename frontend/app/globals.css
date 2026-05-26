@@ -494,6 +494,17 @@ body {
   color: var(--auth-mute);
   margin: 0;
 }
+.auth-divider {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 11px; color: var(--auth-mute-2);
+  text-transform: uppercase; letter-spacing: 0.08em;
+  margin: 6px 0 2px;
+}
+.auth-divider::before, .auth-divider::after {
+  content: ""; flex: 1; height: 1px;
+  background: color-mix(in srgb, currentColor 20%, transparent);
+}
+.auth-divider > span { flex: 0 0 auto; }
 .auth-form__caveat {
   font-size: 11px;
   color: var(--auth-mute-2);

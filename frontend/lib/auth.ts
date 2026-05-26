@@ -54,3 +54,19 @@ export async function changePassword(
   });
   useAuthStore.getState().setAccessToken(data.access_token);
 }
+
+// ─── Google OAuth ───
+// credential = Google ID token (JWT) 從 GIS 拿到
+
+export async function loginWithGoogle(credential: string): Promise<void> {
+  const { data } = await api.post("/auth/google", { credential });
+  useAuthStore.getState().setAccessToken(data.access_token);
+}
+
+export async function linkGoogle(credential: string): Promise<void> {
+  await api.post("/auth/google/link", { credential });
+}
+
+export async function unlinkGoogle(): Promise<void> {
+  await api.post("/auth/google/unlink");
+}

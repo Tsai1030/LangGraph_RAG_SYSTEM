@@ -56,7 +56,16 @@ class UserOut(BaseModel):
     id: str
     email: str
     display_name: str | None
+    avatar_url: str | None = None
     role: str = "user"
     search_enabled: bool = False
+    # 給前端判斷「設定頁」是否要顯示「綁定 Google」按鈕用
+    has_password: bool = False
+    google_linked: bool = False
 
     model_config = {"from_attributes": True}
+
+
+class GoogleAuthRequest(BaseModel):
+    """前端 GIS 拿到 ID token 後 POST 過來。"""
+    credential: str  # Google ID token (JWT)

@@ -8,8 +8,11 @@ export interface User {
   id: string;
   email: string;
   display_name: string | null;
+  avatar_url?: string | null;
   role?: "user" | "admin";
   search_enabled?: boolean;
+  has_password?: boolean;
+  google_linked?: boolean;
 }
 
 // Conversations
