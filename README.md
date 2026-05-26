@@ -367,7 +367,33 @@ PM2 (常駐)
 
 `ecosystem.config.js` 描述 PM2 兩個 process。`C:\caddy\Caddyfile` 是反向代理（簡單兩條規則，不在 git 內）。
 
-### 一鍵啟動
+### 目前啟動方式（COMODO ACL 限制）
+
+> ⚠ **不能用 `start-system.bat` 一鍵啟動**：COMODO EDR 不信任 PM2 spawn 出來的 python 子行程（WSAEACCES 10013，PG :5432 連不上）。
+> backend 必須由「使用者前景 cmd」啟動，PM2 只能用來跑 frontend。
+
+正確的啟動順序（分兩步）：
+
+**1. 啟動 frontend（PM2）**
+
+```powershell
+pm2 start frontend
+```
+
+**2. 啟動 backend（手動，前景）**
+
+`start-backend.bat` 雙擊**也會被 COMODO 擋**。目前唯一可行的方式：**在 IDE 內建 terminal 手動輸入**，COMODO 才會信任這條 process chain：
+
+```powershell
+cd C:\Users\226376\Desktop\data\backend
+uv run python run_server.py
+```
+
+→ 看到 `Application startup complete` 即 OK。**這個 terminal 不能關**，關掉 = backend 停。
+
+未來如果要恢復一鍵啟動，需要重新設定 COMODO 信任 PM2 → python 的 process chain，或改用其他 EDR。詳細根因見 [db.md §8.4](db.md)。
+
+### 一鍵啟動（歷史；現因 COMODO 失效）
 
 ```powershell
 # 開新 PowerShell (UAC 會跳出來，要按是) 跑 start-system.bat
