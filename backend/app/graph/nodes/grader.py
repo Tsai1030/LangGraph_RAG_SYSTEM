@@ -107,7 +107,12 @@ async def query_rewriter(state: GraphState) -> dict:
         HumanMessage(content=human_content),
     ])
 
-    rewritten = result.content.strip()
+    # .text 是跨 provider 統一文字 accessor（Gemini 3.x 的 list[block] 與
+    # Anthropic thinking 模型也能正確抽出純文字；OpenAI 一樣回原字串）
+    text = getattr(result, "text", None) or (
+        result.content if isinstance(result.content, str) else ""
+    )
+    rewritten = text.strip()
 
     # Sanity check：擋掉 LLM 放棄改寫時的垃圾輸出，避免污染下次檢索
     fallback_reason = None
