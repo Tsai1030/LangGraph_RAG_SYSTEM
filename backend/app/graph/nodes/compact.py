@@ -15,9 +15,8 @@ from langchain_core.messages import (
     HumanMessage,
     RemoveMessage,
 )
-from langchain_openai import ChatOpenAI
-
 from app.config import settings
+from app.core.llm import get_llm
 from app.graph.state import GraphState
 from app.prompts import get_prompt
 
@@ -91,15 +90,14 @@ async def summarizer(state: GraphState) -> dict:
 
     history_text = "\n".join(history_lines)
 
-    llm = ChatOpenAI(
-        model=settings.llm_model,
-        api_key=settings.openai_api_key,
-        temperature=0,
-    )
+    llm = get_llm("default", temperature=0)
     summary_response = await llm.ainvoke([
         HumanMessage(content=get_prompt("compact").format(history=history_text))
     ])
-    summary_text: str = summary_response.content
+    # .text 是跨 provider 統一文字 accessor（Gemini 3.x 的 list[block] 也能正確抽出）
+    summary_text: str = getattr(summary_response, "text", None) or (
+        summary_response.content if isinstance(summary_response.content, str) else ""
+    )
 
     # 用 RemoveMessage 刪除舊訊息（add_messages reducer 支援）
     remove_ops = [

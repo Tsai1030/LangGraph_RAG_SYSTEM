@@ -31,10 +31,10 @@ import re
 from typing import Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
 
 from app.config import settings
+from app.core.llm import get_llm
 from app.graph.state import GraphState
 from app.prompts import get_prompt
 from app.services.form_fill_writer import load_schema, write_filled_docx
@@ -372,11 +372,7 @@ async def _llm_extract(
         f"可填欄位（節錄前 {len(visible)}）：\n{field_lines}"
     )
 
-    llm = ChatOpenAI(
-        model=settings.grader_model,
-        api_key=settings.openai_api_key,
-        temperature=0,
-    ).with_structured_output(_Extraction)
+    llm = get_llm("grader", temperature=0).with_structured_output(_Extraction)
 
     return await llm.ainvoke([
         SystemMessage(content=get_prompt("form_fill.collector")),

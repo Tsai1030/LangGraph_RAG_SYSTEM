@@ -13,10 +13,10 @@ from __future__ import annotations
 from typing import Literal, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
 
 from app.config import settings
+from app.core.llm import get_llm
 from app.graph.state import GraphState
 from app.prompts import get_prompt
 
@@ -55,11 +55,11 @@ async def form_structurer(state: GraphState) -> dict:
     """
     import json as _json
 
-    llm = ChatOpenAI(
-        model=settings.form_model,
-        api_key=settings.openai_api_key,
-        temperature=0,
-    ).with_structured_output(FormSchema, method="function_calling")
+    # NOTE: method="function_calling" 是 OpenAI-specific 提示；若未來把 FORM_MODEL
+    # 換成 Gemini / Anthropic，這個 kwarg 要拿掉（LangChain 會自動挑該 provider 的格式）。
+    llm = get_llm("form", temperature=0).with_structured_output(
+        FormSchema, method="function_calling"
+    )
 
     context = state.get("context", "")
     prev_form_data = state.get("prev_form_data")

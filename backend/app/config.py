@@ -15,10 +15,17 @@ class Settings(BaseSettings):
 
     # OpenAI # .env 修改為主
     openai_api_key: str
-    llm_model: str = "gpt-5.4"
-    grader_model: str = "gpt-5.4-mini" 
-    form_model: str = "gpt-5.4"
+    # LLM model strings — 走 LangChain init_chat_model 的 "provider:model" 格式
+    # 例： "openai:gpt-5.4" / "google_genai:gemini-3.1-pro" / "anthropic:claude-..."
+    # 沒前綴會被當成 OpenAI（向後相容；未來建議都加前綴）
+    llm_model: str = "openai:gpt-5.4"
+    grader_model: str = "openai:gpt-5.4-mini"
+    form_model: str = "openai:gpt-5.4"
     embedding_model: str = "text-embedding-3-small"
+
+    # 其他 LLM provider keys — 只有當對應 *_model 用到該 provider 才需要設
+    google_api_key: str = ""
+    anthropic_api_key: str = ""
 
     # Database (SQLite)
     database_url: str

@@ -1,7 +1,7 @@
 """
 generation.py — 回覆生成節點
 
-使用 ChatOpenAI 生成回覆。
+LLM 透過 app.core.llm.get_llm() factory 取得（provider 由 .env 切換）。
 streaming=True 使 LangGraph 的 astream_events 可捕捉 on_chat_model_stream 事件，
 讓 chat endpoint 可逐 token 推送 SSE。
 """
@@ -9,9 +9,9 @@ streaming=True 使 LangGraph 的 astream_events 可捕捉 on_chat_model_stream �
 from __future__ import annotations
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
-from langchain_openai import ChatOpenAI
 
 from app.config import settings
+from app.core.llm import get_llm
 from app.graph.state import GraphState
 from app.prompts import get_prompt
 
@@ -155,85 +155,62 @@ async def responder(state: GraphState) -> dict:
     # ── 填表完成 ─────────────────────────────────────────────
     if intent == "static_form_fill" and session.get("status") == "completed":
         names = "、".join(f"《{f['display_name']}》" for f in matched_forms) or "《表單》"
-        llm = ChatOpenAI(
-            model=settings.grader_model,
-            api_key=settings.openai_api_key,
-            temperature=0,
-            streaming=True,
-            stream_usage=True,
-        )
+        llm = get_llm("grader", temperature=0, streaming=True, stream_usage=True)
         resp = await llm.ainvoke([
             SystemMessage(content=get_prompt("responder.fill_done")),
             HumanMessage(content=f"目標：{names}；已寫入 {session.get('filled_field_count', 0)} 欄位"),
         ])
-        return {"response": resp.content, "messages": [AIMessage(content=resp.content)]}
+        text = getattr(resp, "text", None) or (resp.content if isinstance(resp.content, str) else "")
+        return {"response": text, "messages": [AIMessage(content=text)]}
 
     # ── 填表收集中（追問缺欄位）────────────────────────────
     if intent == "static_form_fill" and session.get("status") == "collecting":
-        llm = ChatOpenAI(
-            model=settings.llm_model,
-            api_key=settings.openai_api_key,
-            temperature=0.3,
-            streaming=True,
-            stream_usage=True,
-        )
+        llm = get_llm("default", temperature=0.3, streaming=True, stream_usage=True)
         resp = await llm.ainvoke([
             SystemMessage(content=get_prompt("responder.fill_collect")),
             HumanMessage(content=_build_fill_collect_user(state)),
         ])
-        return {"response": resp.content, "messages": [AIMessage(content=resp.content)]}
+        text = getattr(resp, "text", None) or (resp.content if isinstance(resp.content, str) else "")
+        return {"response": text, "messages": [AIMessage(content=text)]}
 
     # ── 動態表單匯出：短確認句 ─────────────────────────────
     if intent == "dynamic_form_export":
         exported = state.get("exported_form_file") or {}
         title = exported.get("display_name") or "表單"
         if exported:
-            llm = ChatOpenAI(
-                model=settings.grader_model,
-                api_key=settings.openai_api_key,
-                temperature=0,
-                streaming=True,
-                stream_usage=True,
-            )
+            llm = get_llm("grader", temperature=0, streaming=True, stream_usage=True)
             resp = await llm.ainvoke([
                 SystemMessage(content=get_prompt("responder.export_done")),
                 HumanMessage(content=f"匯出檔：{title}"),
             ])
-            return {"response": resp.content, "messages": [AIMessage(content=resp.content)]}
+            text = getattr(resp, "text", None) or (resp.content if isinstance(resp.content, str) else "")
+        return {"response": text, "messages": [AIMessage(content=text)]}
         # 匯出失敗（無 prev_form_data 等）→ 落入下方一般 RAG 路徑提供錯誤訊息
 
     # ── 靜態表單下載：短確認句 ─────────────────────────────
     if intent == "static_form_download" and form_explicit and matched_forms:
         names = "、".join(f"《{f['display_name']}》" for f in matched_forms)
-        llm = ChatOpenAI(
-            model=settings.grader_model,
-            api_key=settings.openai_api_key,
-            temperature=0,
-            streaming=True,
-            stream_usage=True,
-        )
+        llm = get_llm("grader", temperature=0, streaming=True, stream_usage=True)
         response = await llm.ainvoke([
             SystemMessage(content=get_prompt("responder.static")),
             HumanMessage(content=f"找到：{names}"),
         ])
+        text = getattr(response, "text", None) or (response.content if isinstance(response.content, str) else "")
         return {
-            "response": response.content,
-            "messages": [AIMessage(content=response.content)],
+            "response": text,
+            "messages": [AIMessage(content=text)],
         }
 
     # ── 一般 QA / 動態表單生成 ─────────────────────────────
-    llm = ChatOpenAI(
-        model=settings.llm_model,
-        api_key=settings.openai_api_key,
-        temperature=0.6,
-        streaming=True,
-        stream_usage=True,
-    )
+    llm = get_llm("default", temperature=0.6, streaming=True, stream_usage=True)
 
     prompt_messages = _build_messages(state)
     response = await llm.ainvoke(prompt_messages)
 
+    # .text 是 LangChain 跨 provider 的統一文字 accessor：OpenAI 是純 str，
+    # Gemini 3.x 是 list[block]（含 thought_signature），.text 都會回乾淨字串
+    text = getattr(response, "text", None) or (response.content if isinstance(response.content, str) else "")
     return {
-        "response": response.content,
-        "messages": [AIMessage(content=response.content)],
+        "response": text,
+        "messages": [AIMessage(content=text)],
     }

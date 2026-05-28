@@ -28,10 +28,10 @@ import logging
 from typing import Literal, Optional
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
 
 from app.config import settings
+from app.core.llm import get_llm
 from app.graph.state import GraphState
 from app.prompts import get_prompt
 from app.rag.form_lookup import get_form_meta, lookup_forms
@@ -270,11 +270,7 @@ async def _llm_classify(
         query, candidates, prev_form_data, fill_session, history_text,
     )
 
-    llm = ChatOpenAI(
-        model=settings.grader_model,
-        api_key=settings.openai_api_key,
-        temperature=0,
-    ).with_structured_output(IntentDecision)
+    llm = get_llm("grader", temperature=0).with_structured_output(IntentDecision)
 
     return await llm.ainvoke([
         SystemMessage(content=get_prompt("intent")),

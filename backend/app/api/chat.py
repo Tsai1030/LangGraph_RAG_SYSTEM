@@ -157,11 +157,16 @@ async def chat_stream(
                     # 捕捉 responder 節點的串流 token
                     if event_type == "on_chat_model_stream" and node_name == "responder":
                         chunk = event["data"].get("chunk")
-                        if chunk and hasattr(chunk, "content") and chunk.content:
-                            assistant_response += chunk.content
-                            yield (
-                                f"data: {json.dumps({'type': 'text', 'content': chunk.content}, ensure_ascii=False)}\n\n"
-                            )
+                        if chunk:
+                            # Gemini 3.x 串流 chunk.content 是 list[dict]（含 thought signature
+                            # blocks），OpenAI 是純 str。.text 是 LangChain 跨 provider 的
+                            # 統一文字 accessor — 兩種都安全。
+                            text = getattr(chunk, "text", None) or ""
+                            if text:
+                                assistant_response += text
+                                yield (
+                                    f"data: {json.dumps({'type': 'text', 'content': text}, ensure_ascii=False)}\n\n"
+                                )
 
                     # 任何 LLM call 結束 → 累計 usage（含串流與非串流）
                     if event_type == "on_chat_model_end":

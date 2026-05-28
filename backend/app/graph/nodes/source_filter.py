@@ -11,10 +11,10 @@ import logging
 from typing import List
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
 
 from app.config import settings
+from app.core.llm import get_llm
 from app.graph.state import GraphState
 from app.prompts import get_prompt
 from app.rag.retriever import format_sources
@@ -55,11 +55,7 @@ async def source_filter(state: GraphState) -> dict:
 
     chunks_text = "\n".join(chunk_previews)
 
-    llm = ChatOpenAI(
-        model=settings.grader_model,
-        api_key=settings.openai_api_key,
-        temperature=0,
-    ).with_structured_output(SourceFilterOutput)
+    llm = get_llm("grader", temperature=0).with_structured_output(SourceFilterOutput)
 
     result: SourceFilterOutput = await llm.ainvoke([
         SystemMessage(content=get_prompt("source_filter")),

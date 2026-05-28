@@ -43,6 +43,7 @@ dependencies = [
     "psycopg2-binary>=2.9.12",
     "langgraph-checkpoint-postgres>=3.1.0",
     "google-auth>=2.35",
+    "langchain-google-genai>=2.1",
 ]
 
 [tool.pytest.ini_options]

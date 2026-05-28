@@ -11,10 +11,10 @@ import logging
 from typing import Literal
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
 
 from app.config import settings
+from app.core.llm import get_llm
 from app.graph.state import GraphState
 from app.prompts import get_prompt
 
@@ -64,9 +64,7 @@ async def retrieval_grader(state: GraphState) -> dict:
 
     grader_context = "\n\n".join(previews)
 
-    llm = ChatOpenAI(
-        model=settings.grader_model, api_key=settings.openai_api_key, temperature=0
-    ).with_structured_output(GraderOutput)
+    llm = get_llm("grader", temperature=0).with_structured_output(GraderOutput)
 
     result: GraderOutput = await llm.ainvoke([
         SystemMessage(content=get_prompt("grader")),
@@ -103,7 +101,7 @@ async def query_rewriter(state: GraphState) -> dict:
     else:
         human_content = original_query
 
-    llm = ChatOpenAI(model=settings.grader_model, api_key=settings.openai_api_key, temperature=0)
+    llm = get_llm("grader", temperature=0)
     result = await llm.ainvoke([
         SystemMessage(content=get_prompt("rewriter")),
         HumanMessage(content=human_content),
