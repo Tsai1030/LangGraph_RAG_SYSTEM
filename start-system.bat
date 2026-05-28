@@ -1,9 +1,27 @@
 @echo off
 title Construction KB - Start System
+setlocal enableextensions
 
 REM ========================================================
-REM  Auto-elevate (Caddy may need admin to bind privileged ports)
+REM  start-system.bat
+REM
+REM  What this DOES (automated):
+REM    1. PM2 frontend (Next.js on :3000)
+REM    2. Tailscale Funnel routing (/ -> 3000, /api -> 8000/api)
+REM
+REM  What this does NOT do (manual, COMODO-imposed):
+REM    Backend (FastAPI on :8000). COMODO EDR distrusts both
+REM    PM2-spawned python and double-clicked start-backend.bat.
+REM    Only an interactive IDE terminal launch survives COMODO's
+REM    parent-chain check. So you must run it yourself:
+REM
+REM        cd C:\Users\226376\Desktop\data\backend
+REM        uv run python run_server.py
+REM
+REM    The IDE terminal that runs that command MUST stay open.
 REM ========================================================
+
+REM Auto-elevate (UAC) -- some PM2 / Tailscale ops want admin.
 net session >nul 2>&1
 if %errorLevel% NEQ 0 (
     echo Requesting admin privilege via UAC...
@@ -13,10 +31,7 @@ if %errorLevel% NEQ 0 (
 
 cd /d "%~dp0"
 
-REM ========================================================
-REM  Ensure PATH contains npm + Node.js
-REM  (UAC-elevated session may not inherit User PATH)
-REM ========================================================
+REM UAC-elevated session may not inherit User PATH.
 SET "PATH=%PATH%;%APPDATA%\npm;C:\Program Files\nodejs"
 
 cls
@@ -25,107 +40,79 @@ echo   Construction Knowledge AI - Startup
 echo ============================================
 echo.
 
-REM Sanity check: pm2 must be reachable
+REM Sanity check: pm2 must be reachable.
 where pm2 >nul 2>&1
 if %errorLevel% NEQ 0 (
     echo [ERROR] pm2 not found in PATH.
-    echo.
-    echo Please verify:
-    echo   1. "npm install -g pm2" was run
-    echo   2. PATH contains %%APPDATA%%\npm
-    echo.
-    echo Expected: %APPDATA%\npm\pm2.cmd
-    echo.
+    echo   1. "npm install -g pm2" was run?
+    echo   2. PATH contains %%APPDATA%%\npm ?
     pause
     exit /b 1
 )
 
 REM ========================================================
-REM  1/4 - Backend: foreground cmd (NOT PM2)
-REM         Why: PM2-spawned python.exe hits COMODO EDR WSAEACCES
-REM         when connecting to PostgreSQL on :5432. The user's
-REM         interactive shell is COMODO-trusted; spawning backend
-REM         from a foreground cmd inherits that trust. Until COMODO
-REM         is reconfigured we keep this process tree.
+REM  1/3 - Frontend via PM2
 REM ========================================================
-echo [1/4] Stopping any old PM2 backend entry, then launching backend in new window...
-call pm2 delete backend >nul 2>&1
-start "Backend (FastAPI + PostgreSQL)" cmd /k "cd /d %~dp0 && start-backend.bat"
-echo   Backend launched in a new cmd window. Do NOT close it.
-echo.
-
-REM ========================================================
-REM  2/4 - Frontend via PM2 (no COMODO trouble with Next.js)
-REM ========================================================
-echo [2/4] Resetting + starting PM2 frontend...
+echo [1/3] Resetting + starting PM2 frontend...
 call pm2 delete frontend >nul 2>&1
 call pm2 start ecosystem.config.js --only frontend
 if %errorLevel% NEQ 0 (
-    echo [WARN] PM2 frontend start may have failed; continuing.
+    echo [WARN] PM2 frontend start may have failed. Check: pm2 logs frontend --err
 )
 echo.
 
 REM ========================================================
-REM  2.5 - Wait until backend:8000 and frontend:3000 truly listen
+REM  2/3 - Tailscale Funnel routing
+REM         /    -> 3000 (Next.js)
+REM         /api -> 8000/api (FastAPI direct -- SSE-safe, bypasses Next.js buffer)
 REM ========================================================
-echo Waiting for backend:8000 and frontend:3000 to be ready...
-powershell -NoProfile -Command "$deadline=(Get-Date).AddSeconds(90); $ok=$false; while ((Get-Date) -lt $deadline) { $ns = (netstat -ano | Out-String); $b = $ns -match ':8000\s+0\.0\.0\.0:0\s+LISTENING'; $f = $ns -match ':3000\s+0\.0\.0\.0:0\s+LISTENING'; if ($b -and $f) { Write-Host '  Ready: 8000 + 3000 listening' -ForegroundColor Green; $ok=$true; break }; Start-Sleep -Seconds 1 }; if (-not $ok) { Write-Host ('  TIMEOUT after 90s  (8000=' + $b + ' 3000=' + $f + ')') -ForegroundColor Yellow; exit 1 }"
+echo [2/3] Configuring Tailscale Funnel...
+tailscale serve reset >nul 2>&1
+tailscale funnel --bg http://localhost:3000
+tailscale funnel --bg --set-path=/api http://localhost:8000/api
 if %errorLevel% NEQ 0 (
-    echo [WARN] Ports did not come up in time.
-    echo        Check the Backend cmd window for errors,
-    echo        and:  pm2 logs frontend --err
+    echo [WARN] Tailscale funnel command failed. Run reset-tailscale-routing.ps1 manually.
 )
 echo.
 
 REM ========================================================
-REM  3/4 - Ensure Caddy is NOT running
-REM         (COMODO EDR blocks caddy.exe -> node.exe on this
-REM          machine; we proxy /api via Next.js rewrites instead)
+REM  3/3 - Wait for :3000 and check :8000 (info only)
 REM ========================================================
-echo [3/4] Stopping any leftover Caddy...
-powershell -NoProfile -Command "try { Invoke-WebRequest -Uri 'http://localhost:2019/stop' -Method POST -UseBasicParsing -TimeoutSec 3 | Out-Null } catch {}" >nul 2>&1
-taskkill /F /IM caddy.exe >nul 2>&1
-echo.
+echo [3/3] Waiting up to 60s for frontend :3000 to listen...
+powershell -NoProfile -Command "$d=(Get-Date).AddSeconds(60); $ok=$false; while ((Get-Date) -lt $d) { if (Get-NetTCPConnection -State Listen -LocalPort 3000 -ErrorAction SilentlyContinue) { Write-Host '  Frontend :3000 LISTENING' -ForegroundColor Green; $ok=$true; break }; Start-Sleep -Seconds 1 }; if (-not $ok) { Write-Host '  TIMEOUT waiting for :3000 -- check pm2 logs frontend' -ForegroundColor Yellow }"
 
-REM ========================================================
-REM  4/4 - Tailscale Funnel directly to frontend :3000
-REM         Next.js handles /api/* itself via next.config.ts rewrites
-REM ========================================================
-echo [4/4] Configuring Tailscale Funnel (port 3000)...
-tailscale funnel reset >nul 2>&1
-tailscale funnel --bg 3000
-if %errorLevel% NEQ 0 (
-    echo [WARN] Tailscale funnel may have failed.
-)
+echo.
+echo Checking backend :8000...
+powershell -NoProfile -Command "if (Get-NetTCPConnection -State Listen -LocalPort 8000 -ErrorAction SilentlyContinue) { Write-Host '  Backend  :8000 LISTENING (good)' -ForegroundColor Green } else { Write-Host '  Backend  :8000 NOT listening -- start it manually in your IDE terminal:' -ForegroundColor Yellow; Write-Host '      cd C:\Users\226376\Desktop\data\backend' -ForegroundColor Yellow; Write-Host '      uv run python run_server.py' -ForegroundColor Yellow }"
 echo.
 
 REM ========================================================
 REM  Summary
 REM ========================================================
 echo ============================================
-echo   Startup complete - service status
+echo   Startup status
 echo ============================================
 echo.
 
-echo --- PM2 (frontend only -- backend is in a separate cmd window) ---
+echo --- PM2 (frontend only -- backend runs in your IDE terminal) ---
 call pm2 list
 echo.
 
 echo --- Tailscale Funnel ---
-tailscale funnel status
+tailscale serve status
 echo.
 
 echo ============================================
-echo   Public URL
+echo   Public URL: https://kccc3798.tail138ec9.ts.net
 echo ============================================
 echo.
-echo   https://kccc3798.tail138ec9.ts.net
+echo REMINDER:
+echo   If backend :8000 is NOT listening above, open your IDE terminal:
+echo       cd %~dp0backend
+echo       uv run python run_server.py
+echo   Keep that terminal open -- closing it stops backend.
 echo.
-echo ============================================
-echo.
-echo NOTE:
-echo   Backend runs in the separate 'Backend (FastAPI + PostgreSQL)'
-echo   cmd window. Closing THAT window stops the backend.
-echo   Closing THIS window does NOT stop services.
+echo   If SSE breaks (responses appear all-at-once instead of token-by-token),
+echo   run:   powershell -ExecutionPolicy Bypass -File reset-tailscale-routing.ps1
 echo.
 pause
