@@ -176,6 +176,13 @@ SLOTS: list[SlotDef] = [
         source="fengxing",
         section="fengxing",
     ),
+    SlotDef(
+        key="fx_adjustment_summary",
+        label="豐興本週調整摘要(§六.1 敘述句)",
+        type=SlotType.TEXT,
+        source="fengxing",
+        section="fengxing",
+    ),
 
     # ─── Internal (staff manually fills) ────────────────
     SlotDef(

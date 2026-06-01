@@ -56,7 +56,10 @@ class FengxingExtract(BaseModel):
     )
     adjustment_summary: str | None = Field(
         default=None,
-        description="一句話總結本週相對上週調整，例如『廢鋼、鋼筋同步上調 200 元』或『鋼筋平盤』",
+        description=(
+            "一句話描述本週相對上週的調整，須以「本週」開頭、涵蓋鋼筋/廢鋼/型鋼三者，"
+            "例如「本週廢鋼、鋼筋及型鋼皆維持平盤」或「本週廢鋼、鋼筋同步上調 200 元，型鋼平盤」"
+        ),
     )
 
 

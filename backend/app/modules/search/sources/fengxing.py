@@ -64,7 +64,7 @@ async def _recent_value(db, slot_key: str, cutoff: date) -> tuple[date, float] |
 @register
 class FengxingAdapter(SourceAdapter):
     name = "fengxing"
-    provides = [k for k, _ in _slot_map()]
+    provides = [k for k, _ in _slot_map()] + ["fx_adjustment_summary"]
 
     async def fetch(self, target_date: date) -> list[FetchResult]:
         opening_day = opening_monday(target_date)
@@ -102,7 +102,7 @@ class FengxingAdapter(SourceAdapter):
             f"trace: {trace_summary}"
         )
 
-        return [
+        results = [
             FetchResult(
                 slot_key=key,
                 value=float(all_prices[key]),
@@ -113,6 +113,16 @@ class FengxingAdapter(SourceAdapter):
             )
             for key, _ in _slot_map()
         ]
+        # §六.1 narrative summary sentence (dynamic — was static "皆維持平盤")
+        results.append(FetchResult(
+            slot_key="fx_adjustment_summary",
+            value=None,
+            unit="text",
+            raw_text=(parsed.opening_paragraph or "本週開盤").strip(),
+            source_url=picked_url,
+            confidence="high",
+        ))
+        return results
 
     async def _not_published_or_fallback(
         self, target_date: date, *, reason: str
@@ -153,7 +163,7 @@ class FengxingAdapter(SourceAdapter):
             f"{last_date.month}/{last_date.day} 報價，請稍後重新產生。"
         )
         logger.info("Fengxing not published; borrowing last week %s", last_date)
-        return [
+        results = [
             FetchResult(
                 slot_key=key,
                 value=float(all_prices[key]),
@@ -165,6 +175,15 @@ class FengxingAdapter(SourceAdapter):
             )
             for key, _ in _slot_map()
         ]
+        results.append(FetchResult(
+            slot_key="fx_adjustment_summary",
+            value=None,
+            unit="text",
+            raw_text="本週尚未公布盤價，以下沿用上週報價",
+            source_url="",
+            confidence="low",
+        ))
+        return results
 
     def _fallback(self, target_date: date, *, reason: str) -> list[FetchResult]:
         """Return placeholder rows so downstream nodes don't crash.
@@ -175,7 +194,7 @@ class FengxingAdapter(SourceAdapter):
         defaults would slip into a Word doc that looks complete.
         """
         _ = target_date
-        return [
+        results = [
             FetchResult(
                 slot_key=key,
                 value=None,
@@ -186,3 +205,12 @@ class FengxingAdapter(SourceAdapter):
             )
             for key, _ in _slot_map()
         ]
+        results.append(FetchResult(
+            slot_key="fx_adjustment_summary",
+            value=None,
+            unit="text",
+            raw_text="",
+            source_url="",
+            confidence="low",
+        ))
+        return results
