@@ -28,6 +28,14 @@ class FetchResult(BaseModel):
     raw_text: str = ""
     source_url: str = ""
     confidence: Confidence = "high"
+    is_stale: bool = Field(
+        default=False,
+        description=(
+            "True = value borrowed from a prior week (e.g. 豐興 not yet "
+            "published this week). Display only — must NOT be persisted to "
+            "price_history, or it creates a fake row + 0 week-over-week delta."
+        ),
+    )
     fetched_at: str | None = None  # ISO timestamp set by store on insert
 
 

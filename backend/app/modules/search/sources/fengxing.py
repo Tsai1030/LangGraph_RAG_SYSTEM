@@ -18,9 +18,12 @@ Step 3 of the UI without diving into backend logs.
 from __future__ import annotations
 
 import logging
-from datetime import date
+from datetime import date, timedelta
+
+from app.search_database import SearchAsyncSessionLocal
 
 from ..core.dates import opening_monday
+from ..storage import history_repo
 from .base import FetchResult, SourceAdapter, register
 from .fengxing_gemini import find_article
 
@@ -48,6 +51,16 @@ def _derive_grades(sd280: int) -> dict[str, int]:
     }
 
 
+async def _recent_value(db, slot_key: str, cutoff: date) -> tuple[date, float] | None:
+    """Most recent (value_date, value) for slot_key with a non-null value,
+    on/before `cutoff`. price_history is returned ascending, so newest is last."""
+    pairs = await history_repo.list_recent(db, slot_key, cutoff, count=4)
+    for d, v in reversed(pairs):   # newest first
+        if v is not None:
+            return (d, float(v))
+    return None
+
+
 @register
 class FengxingAdapter(SourceAdapter):
     name = "fengxing"
@@ -59,19 +72,19 @@ class FengxingAdapter(SourceAdapter):
         try:
             parsed, picked, trace = await find_article(target_date)
         except Exception as e:
-            logger.exception("FengxingFinderAgent crashed")
-            return self._fallback(
-                target_date, reason=f"finder agent crashed: {type(e).__name__}: {e}"
+            logger.exception("Fengxing Gemini fetch crashed")
+            return await self._not_published_or_fallback(
+                target_date, reason=f"fetch crashed: {type(e).__name__}: {e}"
             )
 
         # Always include the trace so the user can audit the agent's choice
         trace_summary = " | ".join(trace[-6:])  # last 6 log lines
         if parsed is None or parsed.sd280_price is None:
-            logger.warning("FengxingAdapter: no usable article. trace: %s",
+            logger.warning("FengxingAdapter: no usable price. trace: %s",
                            trace_summary)
-            return self._fallback(
+            return await self._not_published_or_fallback(
                 target_date,
-                reason=f"agent gave up. trace: {trace_summary[:200]}",
+                reason=f"未取得本週盤價. trace: {trace_summary[:200]}",
             )
 
         grades = _derive_grades(parsed.sd280_price)
@@ -97,6 +110,58 @@ class FengxingAdapter(SourceAdapter):
                 raw_text=note,
                 source_url=picked_url,
                 confidence="high",
+            )
+            for key, _ in _slot_map()
+        ]
+
+    async def _not_published_or_fallback(
+        self, target_date: date, *, reason: str
+    ) -> list[FetchResult]:
+        """本週查無 → 先嘗試沿用上週實際報價（標 is_stale）；
+        連上週都沒有才退回紅「—」fallback。"""
+        borrowed = await self._borrow_last_week(target_date)
+        if borrowed is not None:
+            return borrowed
+        return self._fallback(target_date, reason=reason)
+
+    async def _borrow_last_week(
+        self, target_date: date
+    ) -> list[FetchResult] | None:
+        """豐興週一傍晚才公布；本週還沒出時，沿用上週實際報價並標註。
+
+        Pull the most recent real prices strictly before this week's Monday,
+        derive grades, mark is_stale=True (display-only). Returns None if there
+        is no prior data to borrow (→ caller falls back to red '—').
+        """
+        monday = opening_monday(target_date)
+        cutoff = monday - timedelta(days=1)
+        async with SearchAsyncSessionLocal() as db:
+            sd280 = await _recent_value(db, "fx_sd280_price", cutoff)
+            scrap = await _recent_value(db, "fx_scrap_base_price", cutoff)
+            section = await _recent_value(db, "fx_section_steel_price", cutoff)
+        if sd280 is None:
+            return None
+        last_date, sd280_v = sd280
+        grades = _derive_grades(int(sd280_v))
+        all_prices = {
+            **grades,
+            "fx_scrap_base_price": int(scrap[1]) if scrap else 0,
+            "fx_section_steel_price": int(section[1]) if section else 0,
+        }
+        note = (
+            f"豐興本週尚未公布（通常傍晚公布），以下沿用上週 "
+            f"{last_date.month}/{last_date.day} 報價，請稍後重新產生。"
+        )
+        logger.info("Fengxing not published; borrowing last week %s", last_date)
+        return [
+            FetchResult(
+                slot_key=key,
+                value=float(all_prices[key]),
+                unit="元/噸",
+                raw_text=note,
+                source_url="",
+                confidence="low",
+                is_stale=True,
             )
             for key, _ in _slot_map()
         ]

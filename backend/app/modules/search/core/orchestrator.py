@@ -60,9 +60,15 @@ async def _node_fetch(state: GenerationState) -> dict:
 
 
 async def _node_validate(state: GenerationState) -> dict:
-    """Stage 1: flag any missing-but-expected value as a 'warn' issue."""
+    """Stage 1: flag any missing-but-expected value as a 'warn' issue.
+
+    Borrowed last-week values (is_stale) carry value but are surfaced via a
+    deduped user-facing note instead — the frontend shows it (e.g.
+    "豐興本週尚未公布…沿用上週…請稍後重新產生").
+    """
     issues = []
     validated = []
+    stale_notes: set[str] = set()
     for r in state.get("fetched", []):
         if r.value is None:
             issues.append({
@@ -70,7 +76,11 @@ async def _node_validate(state: GenerationState) -> dict:
                 "severity": "warn",
                 "message": f"no value (confidence={r.confidence})",
             })
+        elif getattr(r, "is_stale", False) and r.raw_text:
+            stale_notes.add(r.raw_text)
         validated.append(r)
+    for note in sorted(stale_notes):
+        issues.append({"slot_key": "fengxing", "severity": "warn", "message": note})
     return {"validated": validated, "issues": issues}
 
 
@@ -88,6 +98,8 @@ async def _node_persist(state: GenerationState) -> dict:
         for r in state.get("validated", []):
             if r.value is None:
                 continue   # don't pollute history with nulls
+            if getattr(r, "is_stale", False):
+                continue   # borrowed last-week value — display only, never persist
             await history_repo.upsert_price(db, r, monday, user)
     return {}
 
