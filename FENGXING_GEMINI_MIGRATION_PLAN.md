@@ -17,7 +17,7 @@
 | 5 | §六.2 國際廢鋼改結構化 Gemini 管線 | ✅ commit `715821d`、美國貨櫃 363(+1) 吻合 |
 | 4 | 豐興尚未公布 → 沿用上週 + 標註（`is_stale`） | ✅ 已完成、驗證（借用最近實際週、persist 跳過、validate 去重提示） |
 | 6 | §六.1「皆維持平盤」改為動態摘要（`fx_adjustment_summary`） | ✅ 已完成、驗證（6/1 下調週正確顯示「同步下調 200 元，型鋼平盤」） |
-| 7 | 收尾、退役 steelnet / 移除已死的 `fengxing_finder` | ⏳ 未做 |
+| 7 | 收尾、退役 steelnet / 移除已死的 `fengxing_finder` | ✅ 已完成（刪 `fengxing_finder.py`+`steelnet_client.py`、`FengxingArticleData` 搬入 `fengxing_gemini`、清 `__init__`/`config` steelnet 設定） |
 
 **備註**
 - D3 已定：廢鋼**以網路來源為準**（5/4=10,100）。

@@ -1,7 +1,7 @@
 """Feng Hsin (豐興) weekly opening price fetcher — Gemini + Google Search.
 
-Drop-in replacement for fengxing_finder.find_article after the
-steelnet.com.tw subscription lapsed. Two steps:
+Replaces the old steelnet.com.tw scraping agent after its subscription
+lapsed. Two steps:
 
   1. Gemini + GoogleSearch grounding → a live report of 豐興's opening
      prices for the target week (豐興 opens weekly on Monday).
@@ -23,12 +23,33 @@ from pydantic import BaseModel, Field
 
 from ..core.dates import opening_monday
 from ..llm import get_search_llm
-from .steelnet_client import FengxingArticleData
 
 logger = logging.getLogger(__name__)
 
 # SD280 sanity bounds (元/噸) — same range the old steelnet validator used.
 _SD280_MIN, _SD280_MAX = 15_000, 25_000
+
+
+class FengxingArticleData:
+    """Structured 豐興 weekly-opening result returned by find_article().
+
+    Moved here from the retired steelnet_client when that scraper was removed;
+    only the fields FengxingAdapter consumes are kept.
+    """
+
+    def __init__(self) -> None:
+        self.sd280_price: int | None = None
+        self.scrap_price: int | None = None
+        self.section_price: int | None = None
+        self.opening_paragraph: str = ""
+        self.opening_date: date | None = None
+
+    def __repr__(self) -> str:
+        return (
+            f"FengxingArticleData(SD280={self.sd280_price}, "
+            f"廢鋼={self.scrap_price}, 型鋼={self.section_price}, "
+            f"opening_date={self.opening_date})"
+        )
 
 
 class FengxingExtract(BaseModel):
