@@ -6,6 +6,27 @@
 
 ---
 
+## 進度（2026-06-01，分支 `feat/fengxing-gemini`）
+
+| Stage | 內容 | 狀態 |
+|---|---|---|
+| 1 | `GeminiClient` + `get_search_llm()` 工廠 | ✅ commit `d9d2b48`、smoke 驗證 |
+| 2 | 西本/§九/§六.4 切 Gemini + 關 thinking | ✅ commit `a58dec7`、實測輸出乾淨 |
+| 3 | 豐興抓取改 Gemini+GoogleSearch（結構化） | ✅ commit `e2f2186`、5/4 數字吻合 |
+| — | 修 §六.3 西本多印「### 大陸方面」標題 | ✅ commit `ddaf8e8` |
+| 5 | §六.2 國際廢鋼改結構化 Gemini 管線 | ✅ commit `715821d`、美國貨櫃 363(+1) 吻合 |
+| 4 | 豐興尚未公布 → 沿用上週 + 標註 | ⏳ 未做 |
+| 6 | 潤飾（視情況） | ⏳ 視情況 |
+| 7 | 收尾、退役 steelnet / 移除已死的 `fengxing_finder` | ⏳ 未做 |
+
+**備註**
+- D3 已定：廢鋼**以網路來源為準**（5/4=10,100）。
+- §六.1 敘述句「沒填值」經端到端重現查證為 **Stage 3 重啟前的舊檔**；現行程式碼表格+敘述句會一起填。
+- `fengxing_finder.py` 已無任何來源使用（fengxing→Gemini、weekly_market→結構化），待 Stage 7 清理。
+- 舊週(如 5/4)部分國際項目因 Gemini grounding 對冷門舊資料不穩會顯示「無報價」；當週新鮮資料較完整。
+
+---
+
 ## 0. 現況診斷（我實際讀過程式碼後的結論）
 
 ### 0.1 「鋼筋盤價助理」和「主 RAG」是兩套獨立的 LLM 系統
