@@ -1,9 +1,10 @@
 """Feng Hsin Steel (豐興鋼鐵) weekly-opening price extractor.
 
-Powered by FengxingFinderAgent (LangGraph): given a target meeting date,
-the agent searches steelnet.com.tw with year+month+keyword=豐興, picks the
-correct weekly opening article (LLM tie-break for ambiguous candidates),
-extracts SD280 from "本週牌價" line, derives other rebar grades.
+Powered by fengxing_gemini.find_article (Gemini + Google Search): given a
+target meeting date, it runs a grounded search for 豐興's opening prices that
+week and extracts SD280 / 廢鋼 / 型鋼 absolute numbers via structured output,
+then derives the other rebar grades. (Replaced the steelnet.com.tw scraping
+agent after that site's subscription lapsed.)
 
 User-supplied derivation rules:
     SD280W = SD280 + 200    (welded grade premium)
@@ -21,7 +22,7 @@ from datetime import date
 
 from ..core.dates import opening_monday
 from .base import FetchResult, SourceAdapter, register
-from .fengxing_finder import find_article
+from .fengxing_gemini import find_article
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +95,7 @@ class FengxingAdapter(SourceAdapter):
                 value=float(all_prices[key]),
                 unit="元/噸",
                 raw_text=note,
-                source_url=f"https://www.steelnet.com.tw{picked_url}",
+                source_url=picked_url,
                 confidence="high",
             )
             for key, _ in _slot_map()
