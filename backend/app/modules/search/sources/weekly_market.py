@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from ..llm.openai_client import OpenAIClient
+from ..llm import get_search_llm
 from .base import FetchResult, SourceAdapter, register
 from .fengxing_finder import find_article as find_fengxing_article
 from .steelnet_client import parse_intl_scrap_prices, polish_intl_scrap
@@ -170,7 +170,7 @@ class WeeklyMarketAdapter(SourceAdapter):
         return results
 
     async def fetch(self, target_date: date) -> list[FetchResult]:
-        client = OpenAIClient()
+        client = get_search_llm()
         results: list[FetchResult] = []
 
         # ── 六.2 國際廢鋼/鐵礦 — preferred source is steelnet.com.tw's

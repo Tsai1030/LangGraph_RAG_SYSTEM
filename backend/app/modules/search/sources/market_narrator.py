@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from ..llm.openai_client import OpenAIClient
+from ..llm import get_search_llm
 from .base import FetchResult, SourceAdapter, register
 
 # Anchor texts from the 5/4 PDF — used as style examples in the prompt
@@ -86,7 +86,7 @@ class MarketNarratorAdapter(SourceAdapter):
     provides = ["market_info_domestic", "market_info_china"]
 
     async def fetch(self, target_date: date) -> list[FetchResult]:
-        client = OpenAIClient()
+        client = get_search_llm()
         results: list[FetchResult] = []
 
         # Each entry: (slot_key, search_query, topic_label, style_example)

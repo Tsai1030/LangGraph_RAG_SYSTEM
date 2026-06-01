@@ -68,6 +68,11 @@ class GeminiClient(LLMClient):
             config=types.GenerateContentConfig(
                 system_instruction=system,
                 max_output_tokens=max_tokens,
+                # Disable thinking: these are instruction-following narrative
+                # tasks (write a paragraph from given facts). Leaving thinking
+                # on made gemini-3.5-flash leak reasoning/self-checks into the
+                # output text ("Let's count", "去除markdown", "-> 讀起來有點繞").
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
             ),
         )
         return resp.text or ""
@@ -140,6 +145,7 @@ class GeminiClient(LLMClient):
                 response_schema=schema,
                 max_output_tokens=max_tokens,
                 temperature=0,
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
             ),
         )
         parsed = getattr(resp, "parsed", None)

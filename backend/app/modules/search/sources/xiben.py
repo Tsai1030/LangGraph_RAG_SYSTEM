@@ -32,7 +32,7 @@ from pydantic import BaseModel
 from app.config import settings
 
 from ..core.dates import opening_monday
-from ..llm.openai_client import OpenAIClient
+from ..llm import LLMClient, get_search_llm
 from .base import FetchResult, SourceAdapter, register
 
 logger = logging.getLogger(__name__)
@@ -100,7 +100,7 @@ class XibenAdapter(SourceAdapter):
         this_monday = opening_monday(target_date)
         last_monday = this_monday - timedelta(days=7)
 
-        client = OpenAIClient()
+        client = get_search_llm()
         try:
             snapshot = await self._extract_snapshot(client, this_monday, last_monday)
         except Exception as e:
@@ -135,7 +135,7 @@ class XibenAdapter(SourceAdapter):
 
     async def _extract_snapshot(
         self,
-        client: OpenAIClient,
+        client: LLMClient,
         this_monday: date,
         last_monday: date,
     ) -> XibenSnapshot:
@@ -210,7 +210,7 @@ class XibenAdapter(SourceAdapter):
 
     async def _compose_paragraph(
         self,
-        client: OpenAIClient,
+        client: LLMClient,
         rows: list[dict],
     ) -> str:
         # Pre-built fact table — LLM only assembles the sentence.
