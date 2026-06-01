@@ -25,6 +25,7 @@ Date convention (與豐興一致):
 from __future__ import annotations
 
 import logging
+import re
 from datetime import date, timedelta
 
 from pydantic import BaseModel
@@ -225,8 +226,9 @@ class XibenAdapter(SourceAdapter):
 
         system = (
             "你是台灣鋼鐵採購會議的市場數據編輯。任務：把已備妥的 5 個指數事實表"
-            "組裝成一段「### 3. 大陸方面」段落。**禁止**自己重算數字、改動句型、"
-            "添加任何來源以外的資訊。用語：繁體中文（台灣用語），半正式書面。"
+            "組裝成一段「大陸方面」的純文字段落（**不可**輸出任何標題、# 符號或段落名稱）。"
+            "**禁止**自己重算數字、改動句型、添加任何來源以外的資訊。"
+            "用語：繁體中文（台灣用語），半正式書面。"
         )
         user = f"""請依下方事實表組裝成單一段落：
 
@@ -251,6 +253,9 @@ class XibenAdapter(SourceAdapter):
         # Defensive: strip any stray markdown fences the model might add
         if text.startswith("```"):
             text = text.strip("`").lstrip("markdown").strip()
+        # Strip a leading markdown heading the model sometimes echoes before
+        # the paragraph (e.g. "### 3. 大陸方面") — we only want the prose.
+        text = re.sub(r"^\s*#{1,6}[^\n]*\n+", "", text).strip()
         return text
 
     # ── fallback ──────────────────────────────────────────────
