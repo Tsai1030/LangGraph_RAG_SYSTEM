@@ -23,6 +23,8 @@ export default function ChatPage() {
     appendMessage,
     pendingMessage,
     setPendingMessage,
+    pendingImageIds,
+    setPendingImageIds,
     conversations,
     updateConversationTitle,
     startStreaming,
@@ -233,11 +235,13 @@ export default function ChatPage() {
   );
 
   useEffect(() => {
-    if (loading || !pendingMessage) return;
-    const msg = pendingMessage;
+    if (loading || (!pendingMessage && pendingImageIds.length === 0)) return;
+    const msg = pendingMessage ?? "";
+    const imgs = pendingImageIds;
     setPendingMessage(null);
-    handleSend(msg);
-  }, [handleSend, loading, pendingMessage, setPendingMessage]);
+    setPendingImageIds([]);
+    handleSend(msg, imgs);
+  }, [handleSend, loading, pendingMessage, pendingImageIds, setPendingMessage, setPendingImageIds]);
 
   const handleStop = () => {
     if (!conversationId) return;

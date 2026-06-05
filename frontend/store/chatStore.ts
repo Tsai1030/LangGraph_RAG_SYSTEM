@@ -29,6 +29,8 @@ interface ChatState {
 
   pendingMessage: string | null;
   setPendingMessage: (msg: string | null) => void;
+  pendingImageIds: string[];
+  setPendingImageIds: (ids: string[]) => void;
 
   streamingByConversation: Record<string, ConversationStreamingState>;
   startStreaming: (conversationId: string, message: MessageOut) => void;
@@ -75,6 +77,8 @@ export const useChatStore = create<ChatState>((set) => ({
 
   pendingMessage: null,
   setPendingMessage: (msg) => set({ pendingMessage: msg }),
+  pendingImageIds: [],
+  setPendingImageIds: (ids) => set({ pendingImageIds: ids }),
 
   streamingByConversation: {},
   startStreaming: (conversationId, message) =>
