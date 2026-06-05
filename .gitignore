@@ -34,6 +34,9 @@ form_structure.txt
 # SEARCH 模組產生的 Word 檔（一次 run 一份；不入 git，跟 chroma_db 同性質）
 backend/data/search_outputs/
 
+# VLM 使用者上傳圖片（執行期資料；不入 git，跟 chroma_db / search_outputs 同性質）
+backend/data/uploads/
+
 # ChromaDB 持久化資料
 backend/chroma_db/
 backend/chroma_dev_db/
