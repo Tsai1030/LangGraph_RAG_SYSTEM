@@ -131,6 +131,15 @@ async def lifespan(app: FastAPI):
 
         await _bootstrap_initial_admin()
 
+        # ─── VLM 上傳圖片清理（best-effort；刪除 30 天以上舊上傳，避免磁碟長期累積）───
+        try:
+            from app.services.image_store import cleanup_old_uploads
+            _removed = cleanup_old_uploads()
+            if _removed:
+                print(f"[Startup] cleaned {_removed} old upload image(s)")
+        except Exception:
+            logging.getLogger("app").exception("[Startup] upload cleanup failed")
+
         # ─── SEARCH module bootstrap ───
         # Side-effect imports:
         #   - app.modules.search triggers each @register decorator via the

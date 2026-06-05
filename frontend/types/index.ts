@@ -37,6 +37,7 @@ export interface MessageMeta {
   sources?: Source[];
   form_files?: FormFile[];
   token_count?: number;
+  images?: { image_id: string; mime?: string }[]; // 使用者上傳圖片（泡泡縮圖；用 /api/chat/image/{id} 顯示）
 }
 
 export interface ConversationDetail {

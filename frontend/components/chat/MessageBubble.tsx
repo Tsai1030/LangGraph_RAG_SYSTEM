@@ -10,11 +10,13 @@ import { cn } from "@/lib/utils";
 import type { MessageOut, FormFile, Source } from "@/types";
 import SourcesPanel from "./SourcesPanel";
 import FormFileCard from "./FormFileCard";
+import AuthImage from "./AuthImage";
 
 interface Props {
   message: MessageOut;
   isStreaming?: boolean;
   isFormLoading?: boolean;
+  isImageReading?: boolean;
   streamingSources?: Source[];
   streamingFormFiles?: FormFile[];
   onRetry?: (assistantMessageId: string) => void;
@@ -248,8 +250,16 @@ function GeneratingTableText() {
   );
 }
 
+function ImageReadingText() {
+  return (
+    <span className="text-sm font-medium tracking-wide thinking-gradient select-none">
+      讀取圖片中…
+    </span>
+  );
+}
+
 export default function MessageBubble({
-  message, isStreaming = false, isFormLoading = false, streamingSources, streamingFormFiles,
+  message, isStreaming = false, isFormLoading = false, isImageReading = false, streamingSources, streamingFormFiles,
   onRetry, retryDisabled = false,
 }: Props) {
   const isUser = message.role === "user";
@@ -262,14 +272,34 @@ export default function MessageBubble({
   const markdownComponents = createMarkdownComponents(handleImageClick);
 
   if (isUser) {
+    const images = message.meta?.images ?? [];
     return (
-      <div className="flex justify-end px-6 animate-fade-up">
-        <div className="max-w-[72%]">
-          <div className="bg-zinc-900 text-zinc-100 px-4 py-3 rounded-2xl rounded-br-sm text-base leading-relaxed whitespace-pre-wrap shadow-sm">
-            {message.content}
+      <>
+        {lightbox && (
+          <Lightbox src={lightbox.src} alt={lightbox.alt} onClose={() => setLightbox(null)} />
+        )}
+        <div className="flex justify-end px-6 animate-fade-up">
+          <div className="max-w-[72%] flex flex-col items-end gap-2">
+            {images.length > 0 && (
+              <div className="flex flex-wrap gap-2 justify-end">
+                {images.map((img) => (
+                  <AuthImage
+                    key={img.image_id}
+                    imageId={img.image_id}
+                    className="size-28 rounded-xl object-cover border border-zinc-200 cursor-zoom-in"
+                    onClick={(url) => handleImageClick(url, "")}
+                  />
+                ))}
+              </div>
+            )}
+            {message.content && (
+              <div className="bg-zinc-900 text-zinc-100 px-4 py-3 rounded-2xl rounded-br-sm text-base leading-relaxed whitespace-pre-wrap shadow-sm">
+                {message.content}
+              </div>
+            )}
           </div>
         </div>
-      </div>
+      </>
     );
   }
 
@@ -290,6 +320,8 @@ export default function MessageBubble({
               </div>
             ) : isFormLoading ? (
               <GeneratingTableText />
+            ) : isImageReading ? (
+              <ImageReadingText />
             ) : (
               <ThinkingText />
             )}

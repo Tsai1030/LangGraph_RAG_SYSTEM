@@ -18,6 +18,7 @@ export async function streamChat(
   message: string,
   onText: (text: string) => void,
   onFormLoading: () => void,
+  onImageReading: () => void,
   onFormFiles: (files: FormFile[]) => void,
   onSources: (sources: Source[]) => void,
   onDone: () => void,
@@ -84,6 +85,9 @@ export async function streamChat(
           break;
         case "form_loading":
           onFormLoading();
+          break;
+        case "image_reading":
+          onImageReading();
           break;
         case "form_files":
           onFormFiles(event.data);

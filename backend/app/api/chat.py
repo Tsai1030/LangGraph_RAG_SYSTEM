@@ -19,7 +19,7 @@ import json # 把dict轉成json因為sse stream
 from typing import AsyncGenerator
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from langchain_core.messages import HumanMessage # 建立langchain/langraph用的使用者訊息格式
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -55,6 +55,18 @@ async def chat_upload(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
         )
+
+
+@router.get("/image/{image_id}")
+async def chat_image(
+    image_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """回傳使用者自己上傳的圖片（聊天泡泡縮圖用）。只允許存取自己上傳的圖。"""
+    ref = resolve_image(str(current_user.id), image_id)
+    if ref is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
+    return FileResponse(ref["path"], media_type=ref["mime"])
 
 
 @router.post("/stream")
@@ -95,8 +107,12 @@ async def chat_stream(
         )
     await _chat_semaphore.acquire()
 
-    # ── 2. 儲存使用者訊息 ─────────────────────────────────────
-    await save_message(db, conversation_id, "user", body.message)
+    # ── 2. 儲存使用者訊息（含本輪上傳圖片，供泡泡縮圖；重整後仍可顯示）──
+    user_meta = (
+        {"images": [{"image_id": iid} for iid in body.image_ids]}
+        if body.image_ids else None
+    )
+    await save_message(db, conversation_id, "user", body.message, metadata=user_meta)
 
     # ── 3. 自動設定對話標題（首次訊息） ──────────────────────
     await auto_set_title(db, conversation_id, body.message)
@@ -193,6 +209,12 @@ async def chat_stream(
                     if event_type == "on_chain_start" and event_name == "form_structurer":
                         yield (
                             f"data: {json.dumps({'type': 'form_loading'})}\n\n"
+                        )
+
+                    # vision_intake 開始（且本輪有新上傳圖）→ 推 image_reading 顯示「讀取圖片中…」
+                    if event_type == "on_chain_start" and event_name == "vision_intake" and image_refs:
+                        yield (
+                            f"data: {json.dumps({'type': 'image_reading'})}\n\n"
                         )
 
                     # 捕捉 responder 節點的串流 token

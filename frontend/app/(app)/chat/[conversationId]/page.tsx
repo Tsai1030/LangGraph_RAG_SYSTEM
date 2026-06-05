@@ -30,6 +30,7 @@ export default function ChatPage() {
     startStreaming,
     appendStreamingText,
     setStreamingFormLoading,
+    setStreamingImageReading,
     setStreamingFormFiles,
     setStreamingSources,
     clearStreaming,
@@ -49,6 +50,7 @@ export default function ChatPage() {
 
   const isStreaming = streamingState?.isStreaming ?? false;
   const isFormLoading = streamingState?.isFormLoading ?? false;
+  const isImageReading = streamingState?.isImageReading ?? false;
   const streamingMessage = streamingState?.streamingMessage ?? null;
   const streamingFormFiles = streamingState?.streamingFormFiles ?? [];
   const streamingSources = streamingState?.streamingSources ?? [];
@@ -105,7 +107,9 @@ export default function ChatPage() {
         id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
         role: "user",
         content: text,
-        meta: null,
+        meta: imageIds.length
+          ? { images: imageIds.map((id) => ({ image_id: id })) }
+          : null,
         created_at: new Date().toISOString(),
       };
       appendMessage(userMsg);
@@ -137,6 +141,9 @@ export default function ChatPage() {
           },
           () => {
             setStreamingFormLoading(conversationId, true);
+          },
+          () => {
+            setStreamingImageReading(conversationId, true);
           },
           (files) => {
             latestFormFiles = files;
@@ -227,6 +234,7 @@ export default function ChatPage() {
       startStreaming,
       appendStreamingText,
       setStreamingFormLoading,
+      setStreamingImageReading,
       setStreamingFormFiles,
       setStreamingSources,
       clearStreaming,
@@ -292,6 +300,7 @@ export default function ChatPage() {
         streamingFormFiles={streamingFormFiles}
         streamingSources={streamingSources}
         isFormLoading={isFormLoading}
+        isImageReading={isImageReading}
         onSuggestedQuery={handleSend}
         loading={loading}
         onAtBottomChange={setIsAtBottom}

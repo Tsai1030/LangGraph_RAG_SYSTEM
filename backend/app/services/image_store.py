@@ -7,6 +7,7 @@ image_store.py — VLM 圖片上傳的磁碟儲存與解析。
 from __future__ import annotations
 
 import base64
+import time
 import uuid
 from pathlib import Path
 
@@ -80,3 +81,23 @@ def to_image_block(ref: dict) -> dict | None:
     b64 = base64.b64encode(data).decode()
     mime = ref.get("mime") or "image/png"
     return {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}}
+
+
+def cleanup_old_uploads(max_age_days: int = 30) -> int:
+    """刪除超過 max_age_days 的上傳圖片（best-effort，回傳刪除數）。
+
+    避免上傳目錄無限累積；啟動時掃一次即可（PM2 部署會在每次 deploy 重啟）。
+    """
+    root = Path(settings.upload_dir)
+    if not root.is_dir():
+        return 0
+    cutoff = time.time() - max_age_days * 86400
+    removed = 0
+    for p in root.rglob("*"):
+        try:
+            if p.is_file() and p.stat().st_mtime < cutoff:
+                p.unlink()
+                removed += 1
+        except OSError:
+            pass
+    return removed
