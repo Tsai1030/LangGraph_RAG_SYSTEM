@@ -14,7 +14,7 @@
 | 0 | 開工前驗證（多模態訊息格式、Gemini 收圖 smoke、分支） | ✅ 已驗證（2026-06-05；格式 A、OCR 精準、token 正常） |
 | 1 | 後端：`/api/chat/upload` 上傳端點 + 存磁碟 + state/Schema 加欄位（不接線，零風險） | ✅ 已驗證（2026-06-05；commit e154e1e） |
 | 2 | 新增 `vision_intake` 節點並接進 graph（Gemini 讀圖 → 解析併入 query） | ✅ 已驗證（2026-06-05；commit 7ab68fc，節點實測 1763 字 OCR + no-op 正確） |
-| 3 | responder 用「圖片解析 + 原圖」生成答案（D4） | ⏳ 未開始 |
+| 3 | responder 用「圖片解析 + 原圖」生成答案（D4） | ✅ 已驗證（2026-06-05；commit c410e76，端到端實測精準讀出工令代號 1CA201/合約金額） |
 | 4 | 前端：InputBar 上傳 UI + 把 `image_ids` 串進送出流程 | ⏳ 未開始 |
 | 5 | 多輪圖片對話延續（carry-forward，仿 `prev_form_data`，D6） | ⏳ 未開始 |
 | 6 | 收尾/體驗：SSE「讀取圖片中」指示、聊天泡泡縮圖、磁碟清理 | ⏳ 未開始 |
