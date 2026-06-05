@@ -6,6 +6,7 @@ image_store.py — VLM 圖片上傳的磁碟儲存與解析。
 """
 from __future__ import annotations
 
+import base64
 import uuid
 from pathlib import Path
 
@@ -64,3 +65,18 @@ def resolve_image(user_id: str, image_id: str) -> dict | None:
         if p.is_file():
             return {"id": image_id, "path": str(p), "mime": mime}
     return None
+
+
+def to_image_block(ref: dict) -> dict | None:
+    """把磁碟圖片參照 {path, mime} 轉成 LLM 多模態 content block；讀檔失敗回 None。
+
+    格式 = Stage 0 驗證過的 image_url data-url（格式 A）。vision_intake 與 responder
+    共用此函式，確保多模態圖片格式單一來源（要換格式只改這裡）。
+    """
+    try:
+        data = Path(ref["path"]).read_bytes()
+    except OSError:
+        return None
+    b64 = base64.b64encode(data).decode()
+    mime = ref.get("mime") or "image/png"
+    return {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}}

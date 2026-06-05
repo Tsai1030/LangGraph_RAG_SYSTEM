@@ -14,6 +14,7 @@ from app.config import settings
 from app.core.llm import get_llm
 from app.graph.state import GraphState
 from app.prompts import get_prompt
+from app.services.image_store import to_image_block
 
 
 def _build_form_section(form_data: dict) -> str:
@@ -41,7 +42,10 @@ def _build_form_section(form_data: dict) -> str:
 def _build_messages(state: GraphState) -> list[BaseMessage]:
     """
     組裝送給 LLM 的訊息列表：
-    [System(RAG context + summary + form_data)] + [對話歷史中的 human/ai 訊息]
+    [System(RAG context + summary + form_data + 圖片解析)] + [對話歷史中的 human/ai 訊息]
+
+    有上傳圖片（image_refs）時，把原圖附到當輪 HumanMessage（多模態），讓 Gemini
+    生成前能再核對原圖像素（D4）。原圖只進本次 LLM call，不寫回 state.messages。
     """
     summary = state.get("summary")
     summary_section = f"[前情摘要]\n{summary}\n" if summary else ""
@@ -57,17 +61,31 @@ def _build_messages(state: GraphState) -> list[BaseMessage]:
         names = "、".join(f"《{f['display_name']}》" for f in matched_forms)
         form_offer_hint = f"\n[表單提示]\n回答結束後，在最後一行加上一句：「如需相關作業表單，可點擊下方 {names} 下載。」"
 
+    # 圖片解析（vision_intake 產出）→ 注入 system context 作 grounding
+    image_understanding = state.get("image_understanding")
+    image_section = (
+        f"\n\n[使用者上傳圖片的內容解析]\n{image_understanding}\n（請結合上述圖片內容回答使用者問題）"
+        if image_understanding else ""
+    )
+
     system_content = get_prompt("responder.qa").format(
         summary_section=summary_section,
         context=state.get("context") or "（無相關文件）",
         form_section=form_section,
-    ) + form_offer_hint
+    ) + form_offer_hint + image_section
 
     msgs: list[BaseMessage] = [SystemMessage(content=system_content)]
 
-    # 加入對話歷史（只取 human/ai 訊息）
-    for msg in state.get("messages", []):
-        if isinstance(msg, (HumanMessage, AIMessage)):
+    # 加入對話歷史（只取 human/ai 訊息）；當輪 HumanMessage 若有上傳圖片，附原圖（多模態）
+    history = [m for m in state.get("messages", []) if isinstance(m, (HumanMessage, AIMessage))]
+    image_refs = state.get("image_refs") or []
+    image_blocks = [b for ref in image_refs if (b := to_image_block(ref)) is not None]
+    last_idx = len(history) - 1
+    for i, msg in enumerate(history):
+        if image_blocks and i == last_idx and isinstance(msg, HumanMessage):
+            text = msg.content if isinstance(msg.content, str) else str(msg.content)
+            msgs.append(HumanMessage(content=[{"type": "text", "text": text}, *image_blocks]))
+        else:
             msgs.append(msg)
 
     return msgs

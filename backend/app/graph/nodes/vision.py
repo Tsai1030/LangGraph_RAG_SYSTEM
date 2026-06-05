@@ -13,14 +13,13 @@ vision.py — vision_intake 節點（VLM 圖片輸入）
 
 from __future__ import annotations
 
-import base64
 import logging
-from pathlib import Path
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.core.llm import get_llm
 from app.graph.state import GraphState
+from app.services.image_store import to_image_block
 
 logger = logging.getLogger("app.vision")
 
@@ -31,25 +30,13 @@ _SYSTEM = (
 )
 
 
-def _image_block(ref: dict) -> dict | None:
-    """把一張磁碟圖片轉成 Stage 0 驗證過的 image_url data-url block。"""
-    try:
-        data = Path(ref["path"]).read_bytes()
-    except OSError as e:
-        logger.warning("[vision_intake] 讀檔失敗 %s: %s", ref.get("path"), e)
-        return None
-    b64 = base64.b64encode(data).decode()
-    mime = ref.get("mime") or "image/png"
-    return {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}}
-
-
 async def vision_intake(state: GraphState) -> dict:
     """有圖才跑：Gemini 讀圖 → 解析併入 query。無圖回 {}（no-op）。"""
     refs = state.get("image_refs") or []
     if not refs:
         return {}
 
-    blocks = [b for ref in refs if (b := _image_block(ref)) is not None]
+    blocks = [b for ref in refs if (b := to_image_block(ref)) is not None]
     if not blocks:
         return {}
 
