@@ -91,7 +91,7 @@ export default function ChatPage() {
   }, [conversationId, setCurrentMessages]);
 
   const handleSend = useCallback(
-    async (text: string) => {
+    async (text: string, imageIds: string[] = []) => {
       if (!conversationId || isStreaming) return;
 
       const conv = conversations.find((c) => c.id === conversationId);
@@ -163,7 +163,8 @@ export default function ChatPage() {
             clearStreaming(conversationId);
             delete abortControllersRef.current[conversationId];
           },
-          controller.signal
+          controller.signal,
+          imageIds
         );
       } catch (err: unknown) {
         clearStreaming(conversationId);

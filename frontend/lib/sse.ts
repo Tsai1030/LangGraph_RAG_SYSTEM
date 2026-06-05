@@ -21,7 +21,8 @@ export async function streamChat(
   onFormFiles: (files: FormFile[]) => void,
   onSources: (sources: Source[]) => void,
   onDone: () => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  imageIds: string[] = []
 ): Promise<void> {
   let token = getAccessToken();
 
@@ -35,7 +36,7 @@ export async function streamChat(
         "Content-Type": "application/json",
         ...(t ? { Authorization: `Bearer ${t}` } : {}),
       },
-      body: JSON.stringify({ conversation_id: conversationId, message }),
+      body: JSON.stringify({ conversation_id: conversationId, message, image_ids: imageIds }),
       signal,
     });
 

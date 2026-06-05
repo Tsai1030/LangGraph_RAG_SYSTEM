@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { type ChangeEvent, useEffect, useRef, useState } from "react";
 import {
+  Plus,
   Files,
+  ImagePlus,
   Download,
   Sparkles,
   ArrowLeft,
@@ -12,27 +14,27 @@ import {
 import api from "@/lib/api";
 import { getAccessToken } from "@/store/authStore";
 import { cn } from "@/lib/utils";
-import type { FormFile } from "@/types";
+import type { FormFile, PendingImage } from "@/types";
 
 interface Props {
   /** 點擊「AI 代填」時送出對話訊息。會把 popover 關掉並送出固定字串。 */
   onSendMessage: (message: string) => void;
+  /** 上傳圖片成功後回傳給 InputBar 暫存（送出時帶 image_id）。未提供時不顯示「上傳圖片」、直接開到表單清單。 */
+  onAddImage?: (img: PendingImage) => void;
   disabled?: boolean;
 }
 
 /**
- * FormPickerButton — InputBar 左側的表單選單觸發鈕。
+ * FormPickerButton — InputBar 左側的「+」新增選單觸發鈕。
  *
- * 行為：
- * - 點擊 trigger → 向上展開 popover，列出 GET /api/forms 拿到的靜態表
- * - 每列：表單名 + 右側 chevron。hover 整列彈出右側子選單（Download / Ask AI）
- *   - hover 子選單只會在游標停留時顯示
- *   - 點擊整列會把該列的子選單鎖定，再點同列或別列才會切換
- * - 點「Ask AI」走現有確認檢視；點「Download」直接下載 docx
- * - 點外面 / Esc 關閉
+ * 點「+」展開 root 選單（樣式與原表單選單一致）：
+ *   - 選擇表單 → 進入表單清單（GET /api/forms；每列 hover 子選單 Download / Ask AI）
+ *   - 上傳圖片 → 開檔案選擇器，上傳到 /api/chat/upload，回傳 image_id 給 InputBar
+ * 點外面 / Esc 關閉。
  */
-export default function FormPickerButton({ onSendMessage, disabled }: Props) {
+export default function FormPickerButton({ onSendMessage, onAddImage, disabled }: Props) {
   const [open, setOpen] = useState(false);
+  const [view, setView] = useState<"root" | "forms">("root");
   const [forms, setForms] = useState<FormFile[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -40,12 +42,15 @@ export default function FormPickerButton({ onSendMessage, disabled }: Props) {
   const [confirmingForm, setConfirmingForm] = useState<FormFile | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [lockedId, setLockedId] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // ── 第一次開啟時載入清單，之後快取不重抓 ───────────────
+  // ── 進入表單清單時載入清單，之後快取不重抓 ─────────────
   useEffect(() => {
-    if (!open || forms.length) return;
+    if (view !== "forms" || forms.length) return;
     let cancelled = false;
     (async () => {
       setLoading(true);
@@ -62,7 +67,7 @@ export default function FormPickerButton({ onSendMessage, disabled }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [open, forms.length]);
+  }, [view, forms.length]);
 
   // ── 點外面 / Esc 關閉 ──────────────────────────────────
   useEffect(() => {
@@ -91,9 +96,22 @@ export default function FormPickerButton({ onSendMessage, disabled }: Props) {
 
   const closeAll = () => {
     setOpen(false);
+    setView("root");
     setConfirmingForm(null);
     setHoveredId(null);
     setLockedId(null);
+    setUploadError(null);
+  };
+
+  const toggleOpen = () => {
+    if (open) {
+      closeAll();
+    } else {
+      // 有 onAddImage（聊天 InputBar）→ 開 root 兩層選單；否則（新對話頁）直接開表單清單
+      setView(onAddImage ? "root" : "forms");
+      setUploadError(null);
+      setOpen(true);
+    }
   };
 
   const handleDownload = async (form: FormFile) => {
@@ -123,6 +141,36 @@ export default function FormPickerButton({ onSendMessage, disabled }: Props) {
     closeAll();
   };
 
+  // ── 上傳圖片 → /api/chat/upload，回傳 image_id 給 InputBar ──
+  const handleFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = ""; // 清空 input，讓同一張圖可重選
+    if (!files.length) return;
+    setUploading(true);
+    setUploadError(null);
+    try {
+      for (const file of files) {
+        const fd = new FormData();
+        fd.append("file", file);
+        const { data } = await api.post<{ image_id: string; mime_type: string }>(
+          "/chat/upload",
+          fd
+        );
+        onAddImage?.({
+          image_id: data.image_id,
+          mime_type: data.mime_type,
+          preview_url: URL.createObjectURL(file),
+          name: file.name,
+        });
+      }
+      closeAll();
+    } catch {
+      setUploadError("上傳失敗，請稍後再試");
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const activeId = lockedId ?? hoveredId;
 
   return (
@@ -130,9 +178,9 @@ export default function FormPickerButton({ onSendMessage, disabled }: Props) {
       <button
         ref={triggerRef}
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={toggleOpen}
         disabled={disabled}
-        title="選擇表單"
+        title="新增"
         aria-expanded={open}
         className={cn(
           "shrink-0 size-8 rounded-full flex items-center justify-center transition-colors",
@@ -141,8 +189,17 @@ export default function FormPickerButton({ onSendMessage, disabled }: Props) {
           disabled && "opacity-50 cursor-not-allowed"
         )}
       >
-        <Files size={16} className="text-zinc-600" />
+        <Plus size={18} className="text-zinc-600" />
       </button>
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        multiple
+        hidden
+        onChange={handleFileChange}
+      />
 
       {open && (
         <div
@@ -152,7 +209,7 @@ export default function FormPickerButton({ onSendMessage, disabled }: Props) {
             "rounded-xl border border-zinc-200 bg-white shadow-lg"
           )}
         >
-          {/* 標題列；確認模式時切成「返回」+ 警告標題 */}
+          {/* 標題列：root / 表單清單 / 確認 三種狀態 */}
           <div className="px-4 py-3 flex items-center gap-2">
             {confirmingForm ? (
               <>
@@ -166,9 +223,24 @@ export default function FormPickerButton({ onSendMessage, disabled }: Props) {
                 <AlertTriangle size={14} className="text-amber-500" />
                 <span className="text-[12px] font-medium text-zinc-700">確認開始填寫</span>
               </>
+            ) : view === "forms" ? (
+              <>
+                {onAddImage && (
+                  <button
+                    onClick={() => setView("root")}
+                    className="size-6 rounded hover:bg-zinc-100 flex items-center justify-center"
+                    aria-label="返回"
+                  >
+                    <ArrowLeft size={14} className="text-zinc-500" />
+                  </button>
+                )}
+                <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wide">
+                  選擇表單
+                </span>
+              </>
             ) : (
               <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wide">
-                選擇表單
+                新增
               </span>
             )}
           </div>
@@ -197,6 +269,31 @@ export default function FormPickerButton({ onSendMessage, disabled }: Props) {
                   </button>
                 </div>
               </div>
+            ) : view === "root" ? (
+              // ── root：選擇表單 / 上傳圖片 ─────────────
+              <>
+                <button
+                  type="button"
+                  onClick={() => setView("forms")}
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left text-[14px] text-zinc-800 hover:bg-zinc-100 transition-colors"
+                >
+                  <Files size={15} className="shrink-0 text-zinc-500" />
+                  <span className="flex-1">選擇表單</span>
+                  <ChevronRight size={14} className="shrink-0 text-zinc-400" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploading}
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left text-[14px] text-zinc-800 hover:bg-zinc-100 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  <ImagePlus size={15} className="shrink-0 text-zinc-500" />
+                  <span className="flex-1">{uploading ? "上傳中…" : "上傳圖片"}</span>
+                </button>
+                {uploadError && (
+                  <p className="px-3 pt-1 text-[12px] text-rose-500">{uploadError}</p>
+                )}
+              </>
             ) : loading ? (
               <p className="text-[12px] text-zinc-500 text-center py-6">載入中…</p>
             ) : error ? (
@@ -232,7 +329,7 @@ export default function FormPickerButton({ onSendMessage, disabled }: Props) {
                             "absolute z-10 rounded-lg border border-zinc-200 bg-white shadow-lg p-1",
                             // 桌面：彈到 active row 右側
                             "left-full top-0 ml-1 w-40",
-                            // 手機：依 active row 對齊頂部，靠在該列右側內緣（不外溢、不固定貼標題列）
+                            // 手機：靠在該列右側內緣（不外溢）
                             "max-sm:left-auto max-sm:right-0 max-sm:ml-0 max-sm:w-36"
                           )}
                         >

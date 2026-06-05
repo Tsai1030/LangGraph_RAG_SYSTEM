@@ -64,6 +64,14 @@ export interface FormFile {
   download_url: string;
 }
 
+// 待送出的已上傳圖片（InputBar 暫存，送出時帶 image_id 給後端）
+export interface PendingImage {
+  image_id: string;
+  mime_type: string;
+  preview_url: string; // 本地 object URL，供縮圖預覽
+  name: string;
+}
+
 // SSE Events
 export type SSEEvent =
   | { type: "text"; content: string }
