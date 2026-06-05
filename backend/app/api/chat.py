@@ -112,12 +112,24 @@ async def chat_stream(
     # 讀取最近一輪有生成過的 form_data（供多輪表單延續使用）
     # 若上一輪沒有 form（form_data=None），繼續往前找 prev_form_data，避免斷鏈
     prev_form_data = None
+    prev_image_refs: list = []
+    prev_image_understanding = None
     try:
         prev_state = await graph.aget_state(config)
         if prev_state and prev_state.values:
             prev_form_data = (
                 prev_state.values.get("form_data")
                 or prev_state.values.get("prev_form_data")
+            )
+            # 多輪圖片延續：撈上一輪的圖片參照與解析（沿用「最近一張」直到有新圖）
+            prev_image_refs = (
+                prev_state.values.get("image_refs")
+                or prev_state.values.get("prev_image_refs")
+                or []
+            )
+            prev_image_understanding = (
+                prev_state.values.get("image_understanding")
+                or prev_state.values.get("prev_image_understanding")
             )
     except Exception:
         pass
@@ -152,8 +164,10 @@ async def chat_stream(
         "form_explicit": False,           # 是否為明確表單下載請求
         "is_form_continuation": False,    # 每輪重置，由 router 重新判斷
         "prev_form_data": prev_form_data, # 最近一輪有 form 的資料（多輪延續用）
-        "image_refs": image_refs,         # VLM：本輪圖片參照（path/id）；Stage 2 才被消費
-        "image_understanding": None,      # vision_intake 產出（Stage 2 填）
+        "image_refs": image_refs,         # VLM：本輪上傳的圖片參照（path/id）
+        "image_understanding": None,      # vision_intake 產出
+        "prev_image_refs": prev_image_refs,                 # 多輪延續：上一輪圖片（無新圖時沿用）
+        "prev_image_understanding": prev_image_understanding,
     }
 
     # ── 6. SSE 事件生成器 ─────────────────────────────────────

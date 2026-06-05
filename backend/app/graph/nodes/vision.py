@@ -31,9 +31,21 @@ _SYSTEM = (
 
 
 async def vision_intake(state: GraphState) -> dict:
-    """有圖才跑：Gemini 讀圖 → 解析併入 query。無圖回 {}（no-op）。"""
+    """
+    本輪有新圖 → Gemini 讀圖、解析併入 query（讓檢索找對文件）。
+    本輪無新圖但上一輪有圖 → 沿用上一輪解析與圖片給 responder（回答「那張圖…」追問），
+      但**不改 query**（本輪檢索用使用者的新問題，不被舊圖污染）。
+    都沒有 → {}（no-op）。
+    """
     refs = state.get("image_refs") or []
     if not refs:
+        # 多輪延續：沿用上一張圖的解析 + 參照（不重跑 Gemini、不動 query）
+        prev_understanding = state.get("prev_image_understanding")
+        if prev_understanding:
+            return {
+                "image_understanding": prev_understanding,
+                "image_refs": state.get("prev_image_refs") or [],
+            }
         return {}
 
     blocks = [b for ref in refs if (b := to_image_block(ref)) is not None]

@@ -83,3 +83,6 @@ class GraphState(TypedDict):
     # image_understanding：vision_intake 對圖片的文字解析（Stage 2 才會填值）
     image_refs: list[dict]
     image_understanding: Optional[str]
+    # 多輪延續：上一輪的圖片參照與解析（仿 prev_form_data；本輪無新圖時沿用「最近一張」）
+    prev_image_refs: list[dict]
+    prev_image_understanding: Optional[str]

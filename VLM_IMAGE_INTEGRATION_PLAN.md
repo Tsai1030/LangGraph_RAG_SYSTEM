@@ -15,7 +15,7 @@
 | 1 | 後端：`/api/chat/upload` 上傳端點 + 存磁碟 + state/Schema 加欄位（不接線，零風險） | ✅ 已驗證（2026-06-05；commit e154e1e） |
 | 2 | 新增 `vision_intake` 節點並接進 graph（Gemini 讀圖 → 解析併入 query） | ✅ 已驗證（2026-06-05；commit 7ab68fc，節點實測 1763 字 OCR + no-op 正確） |
 | 3 | responder 用「圖片解析 + 原圖」生成答案（D4） | ✅ 已驗證（2026-06-05；commit c410e76，端到端實測精準讀出工令代號 1CA201/合約金額） |
-| 4 | 前端：InputBar 上傳 UI + 把 `image_ids` 串進送出流程 | ⏳ 未開始 |
+| 4 | 前端：InputBar 上傳 UI + 把 `image_ids` 串進送出流程（聊天頁 + 新對話頁） | ✅ 已驗證（2026-06-05；commit 9580067） |
 | 5 | 多輪圖片對話延續（carry-forward，仿 `prev_form_data`，D6） | ⏳ 未開始 |
 | 6 | 收尾/體驗：SSE「讀取圖片中」指示、聊天泡泡縮圖、磁碟清理 | ⏳ 未開始 |
 
@@ -163,7 +163,7 @@
 ### Stage 5 — 多輪圖片對話延續（核心，D6）
 - [ ] `app/graph/state.py`：`GraphState` 再加 `prev_image_refs` / `prev_image_understanding`（附加欄位）。
 - [ ] `app/api/chat.py`：仿 `prev_form_data`，從 `graph.aget_state` 撈上輪 `image_refs` / `image_understanding` → 放進 `initial_state` 的 `prev_image_*`。
-- [ ] `vision_intake`：本輪**有**新圖 → 照常處理（取代上一張）；本輪**無**新圖但有 `prev_image_*` → 直接沿用上一張的 `image_understanding`（**不重跑 Gemini**，零額外成本），並把 `image_refs` 設為舊圖路徑 → responder（D4=是）會**從磁碟重讀舊圖**回答細節。
+- [ ] `vision_intake`：本輪**有**新圖 → 照常處理（取代上一張）；本輪**無**新圖但有 `prev_image_*` → 直接沿用上一張的 `image_understanding`（**不重跑 Gemini**，零額外成本），並把 `image_refs` 設為舊圖路徑 → responder（D4=是）會**從磁碟重讀舊圖**回答細節。**沿用時不改 query**：本輪檢索用使用者新問題，避免被舊圖內容污染（計畫書沒寫到、實作時補的關鍵細節）。
 - [ ] 策略：保留「最近一組」圖片，使用者上傳新圖即取代。
 - **驗證**：上傳盤價表問一輪 → 下一輪不附圖追問「那張圖的 SD420 比上週漲多少」仍精準答得出。
 
