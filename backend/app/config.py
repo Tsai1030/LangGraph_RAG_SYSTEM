@@ -46,6 +46,11 @@ class Settings(BaseSettings):
     chroma_versions_path: str = "./chroma_versions"  # 版本化 ChromaDB 的根目錄
     chroma_active_version: str = ""  # 留空 = 使用 chroma_persist_path；設為 "v1" 等使用版本化路徑
 
+    # ── 圖片上傳（VLM 圖片輸入）─────────────────────────────────
+    # 使用者上傳圖片的存放目錄（相對 backend/ 執行目錄）。圖片存磁碟，
+    # graph state 只放路徑/id，base64 不進 checkpoint。
+    upload_dir: str = "./data/uploads"
+
     # App
     app_env: str = "development"
     cors_origins: str = "http://localhost:3000"

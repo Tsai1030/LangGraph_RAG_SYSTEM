@@ -18,7 +18,7 @@ import asyncio
 import json # 把dict轉成json因為sse stream
 from typing import AsyncGenerator
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import HumanMessage # 建立langchain/langraph用的使用者訊息格式
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,10 +32,29 @@ from app.services.conversation_service import (
     get_summary,
     save_message,
 )
+from app.services.image_store import resolve_image, save_upload
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
 _chat_semaphore = asyncio.Semaphore(20)
+
+
+@router.post("/upload")
+async def chat_upload(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
+    """POST /api/chat/upload — 上傳一張圖片，回 {image_id, mime_type}。
+
+    圖片存磁碟（settings.upload_dir/{user_id}/...）；送訊息時把回傳的
+    image_id 放進 ChatRequest.image_ids。base64 不進 graph state。
+    """
+    try:
+        return await save_upload(str(current_user.id), file)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+        )
 
 
 @router.post("/stream")
@@ -103,6 +122,12 @@ async def chat_stream(
     except Exception:
         pass
 
+    # ── 解析本輪上傳圖片（VLM）→ 只放輕量參照，base64 不進 state ──
+    image_refs = [
+        ref for iid in body.image_ids
+        if (ref := resolve_image(user_id, iid)) is not None
+    ]
+
     initial_state = {
         "conversation_id": conversation_id,
         "user_id": user_id,
@@ -127,6 +152,8 @@ async def chat_stream(
         "form_explicit": False,           # 是否為明確表單下載請求
         "is_form_continuation": False,    # 每輪重置，由 router 重新判斷
         "prev_form_data": prev_form_data, # 最近一輪有 form 的資料（多輪延續用）
+        "image_refs": image_refs,         # VLM：本輪圖片參照（path/id）；Stage 2 才被消費
+        "image_understanding": None,      # vision_intake 產出（Stage 2 填）
     }
 
     # ── 6. SSE 事件生成器 ─────────────────────────────────────

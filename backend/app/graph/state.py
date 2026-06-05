@@ -76,3 +76,10 @@ class GraphState(TypedDict):
     #   "filled_token": "<filename>"  # 完成填寫後的 docx 檔名（download endpoint 用）
     # }
     form_fill_session: Optional[dict]
+
+    # ── VLM 圖片輸入 ──────────────────────────────────────────
+    # image_refs：本輪要處理的圖片，只放輕量參照（base64 不進 state/checkpoint）
+    #   [{"id": "<hex>", "path": "<磁碟路徑>", "mime": "image/png"}]
+    # image_understanding：vision_intake 對圖片的文字解析（Stage 2 才會填值）
+    image_refs: list[dict]
+    image_understanding: Optional[str]
