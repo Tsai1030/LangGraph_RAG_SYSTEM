@@ -3,6 +3,7 @@ builder.py — 組裝 LangGraph StateGraph
 
 Graph 流程：
   START
+    └─► vision_intake（有圖：Gemini 讀圖→解析併入 query；無圖：no-op 跳過）
     └─► compact_check
           ├─ is_compact_needed=True  ─► summarizer ─┐
           └─ is_compact_needed=False ───────────────┘
@@ -54,6 +55,7 @@ from app.graph.nodes.grader import query_rewriter, retrieval_grader
 from app.graph.nodes.retrieval import retriever
 from app.graph.nodes.source_filter import source_filter
 from app.graph.nodes.unified_intent import unified_intent
+from app.graph.nodes.vision import vision_intake
 from app.graph.state import GraphState
 
 _MAX_RETRIES = 2
@@ -124,6 +126,7 @@ def build_graph(checkpointer=None):
     graph = StateGraph(GraphState)
 
     # ── 加入節點 ────────────────────────────────────────────
+    graph.add_node("vision_intake", vision_intake)
     graph.add_node("compact_check", compact_check)
     graph.add_node("summarizer", summarizer)
     graph.add_node("unified_intent", unified_intent)
@@ -141,8 +144,9 @@ def build_graph(checkpointer=None):
 
     # ── 加入邊 ──────────────────────────────────────────────
 
-    # 入口
-    graph.add_edge(START, "compact_check")
+    # 入口：先過 vision_intake（有圖才讀圖→解析併入 query；無圖 no-op 直接過）
+    graph.add_edge(START, "vision_intake")
+    graph.add_edge("vision_intake", "compact_check")
 
     # compact_check → summarizer 或 unified_intent
     graph.add_conditional_edges("compact_check", _route_compact)
