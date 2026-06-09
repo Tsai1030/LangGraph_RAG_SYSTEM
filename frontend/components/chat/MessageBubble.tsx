@@ -17,6 +17,7 @@ interface Props {
   isStreaming?: boolean;
   isFormLoading?: boolean;
   isImageReading?: boolean;
+  currentStep?: string | null;
   streamingSources?: Source[];
   streamingFormFiles?: FormFile[];
   onRetry?: (assistantMessageId: string) => void;
@@ -234,10 +235,10 @@ function createMarkdownComponents(onImageClick: (src: string, alt: string) => vo
   };
 }
 
-function ThinkingText() {
+function ThinkingText({ step }: { step?: string | null }) {
   return (
     <span className="text-sm font-medium tracking-wide thinking-gradient select-none">
-      Thinking
+      {step || "Thinking…"}
     </span>
   );
 }
@@ -259,7 +260,7 @@ function ImageReadingText() {
 }
 
 export default function MessageBubble({
-  message, isStreaming = false, isFormLoading = false, isImageReading = false, streamingSources, streamingFormFiles,
+  message, isStreaming = false, isFormLoading = false, isImageReading = false, currentStep, streamingSources, streamingFormFiles,
   onRetry, retryDisabled = false,
 }: Props) {
   const isUser = message.role === "user";
@@ -323,7 +324,7 @@ export default function MessageBubble({
             ) : isImageReading ? (
               <ImageReadingText />
             ) : (
-              <ThinkingText />
+              <ThinkingText step={currentStep} />
             )}
           </div>
 

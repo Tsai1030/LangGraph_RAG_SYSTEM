@@ -23,7 +23,8 @@ export async function streamChat(
   onSources: (sources: Source[]) => void,
   onDone: () => void,
   signal?: AbortSignal,
-  imageIds: string[] = []
+  imageIds: string[] = [],
+  onStep?: (node: string, label: string) => void,
 ): Promise<void> {
   let token = getAccessToken();
 
@@ -91,6 +92,9 @@ export async function streamChat(
           break;
         case "form_files":
           onFormFiles(event.data);
+          break;
+        case "step":
+          onStep?.(event.node, event.label);
           break;
         case "sources":
           onSources(event.data);

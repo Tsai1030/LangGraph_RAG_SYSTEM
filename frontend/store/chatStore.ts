@@ -10,6 +10,7 @@ interface ConversationStreamingState {
   isStreaming: boolean;
   isFormLoading: boolean;
   isImageReading: boolean;
+  currentStep: string | null;
   streamingMessage: MessageOut | null;
   streamingFormFiles: FormFile[];
   streamingSources: Source[];
@@ -36,6 +37,7 @@ interface ChatState {
   streamingByConversation: Record<string, ConversationStreamingState>;
   startStreaming: (conversationId: string, message: MessageOut) => void;
   appendStreamingText: (conversationId: string, chunk: string) => void;
+  setStreamingStep: (conversationId: string, step: string | null) => void;
   setStreamingFormLoading: (conversationId: string, loading: boolean) => void;
   setStreamingImageReading: (conversationId: string, reading: boolean) => void;
   setStreamingFormFiles: (conversationId: string, files: FormFile[]) => void;
@@ -91,6 +93,7 @@ export const useChatStore = create<ChatState>((set) => ({
           isStreaming: true,
           isFormLoading: false,
           isImageReading: false,
+          currentStep: null,
           streamingMessage: message,
           streamingFormFiles: [],
           streamingSources: [],
@@ -110,11 +113,23 @@ export const useChatStore = create<ChatState>((set) => ({
             // 收到 token → 表示生成階段已過、進入回覆階段，自動關掉 loading
             isFormLoading: false,
             isImageReading: false,
+            currentStep: null,
             streamingMessage: {
               ...current.streamingMessage,
               content: current.streamingMessage.content + chunk,
             },
           },
+        },
+      };
+    }),
+  setStreamingStep: (conversationId, step) =>
+    set((s) => {
+      const current = s.streamingByConversation[conversationId];
+      if (!current) return s;
+      return {
+        streamingByConversation: {
+          ...s.streamingByConversation,
+          [conversationId]: { ...current, currentStep: step },
         },
       };
     }),

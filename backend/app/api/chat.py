@@ -38,6 +38,24 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 
 _chat_semaphore = asyncio.Semaphore(20)
 
+NODE_STEP_LABELS: dict[str, str] = {
+    "vision_intake":        "Analyzing image…",
+    "compact_check":        "Checking context…",
+    "summarizer":           "Compressing history…",
+    "unified_intent":       "Understanding intent…",
+    "retriever":            "Searching knowledge base…",
+    "context_builder":      "Building context…",
+    "retrieval_grader":     "Evaluating relevance…",
+    "query_rewriter":       "Refining search query…",
+    "form_structurer":      "Structuring form…",
+    "form_template_loader": "Loading form template…",
+    "form_fill_collector":  "Collecting form fields…",
+    "form_filler":          "Filling form…",
+    "form_exporter":        "Exporting form…",
+    "responder":            "Generating response…",
+    "source_filter":        "Filtering sources…",
+}
+
 
 @router.post("/upload")
 async def chat_upload(
@@ -204,6 +222,12 @@ async def chat_stream(
                     event_type = event.get("event", "")
                     event_name = event.get("name", "")
                     node_name = event.get("metadata", {}).get("langgraph_node", "")
+
+                    # 每個 graph node 開始 → 推送 step 事件讓前端顯示進度
+                    if event_type == "on_chain_start" and event_name in NODE_STEP_LABELS:
+                        yield (
+                            f"data: {json.dumps({'type': 'step', 'node': event_name, 'label': NODE_STEP_LABELS[event_name]})}\n\n"
+                        )
 
                     # form_structurer 開始 → 推送 form_loading 讓前端顯示「Generating table…」
                     if event_type == "on_chain_start" and event_name == "form_structurer":

@@ -29,6 +29,7 @@ export default function ChatPage() {
     updateConversationTitle,
     startStreaming,
     appendStreamingText,
+    setStreamingStep,
     setStreamingFormLoading,
     setStreamingImageReading,
     setStreamingFormFiles,
@@ -51,6 +52,7 @@ export default function ChatPage() {
   const isStreaming = streamingState?.isStreaming ?? false;
   const isFormLoading = streamingState?.isFormLoading ?? false;
   const isImageReading = streamingState?.isImageReading ?? false;
+  const currentStep = streamingState?.currentStep ?? null;
   const streamingMessage = streamingState?.streamingMessage ?? null;
   const streamingFormFiles = streamingState?.streamingFormFiles ?? [];
   const streamingSources = streamingState?.streamingSources ?? [];
@@ -173,7 +175,10 @@ export default function ChatPage() {
             delete abortControllersRef.current[conversationId];
           },
           controller.signal,
-          imageIds
+          imageIds,
+          (_node, label) => {
+            setStreamingStep(conversationId, label);
+          },
         );
       } catch (err: unknown) {
         clearStreaming(conversationId);
@@ -233,6 +238,7 @@ export default function ChatPage() {
       appendMessage,
       startStreaming,
       appendStreamingText,
+      setStreamingStep,
       setStreamingFormLoading,
       setStreamingImageReading,
       setStreamingFormFiles,
@@ -301,6 +307,7 @@ export default function ChatPage() {
         streamingSources={streamingSources}
         isFormLoading={isFormLoading}
         isImageReading={isImageReading}
+        currentStep={currentStep}
         onSuggestedQuery={handleSend}
         loading={loading}
         onAtBottomChange={setIsAtBottom}
