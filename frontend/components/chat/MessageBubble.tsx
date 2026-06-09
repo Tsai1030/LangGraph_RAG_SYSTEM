@@ -253,7 +253,7 @@ function GeneratingTableText() {
 function ImageReadingText() {
   return (
     <span className="text-sm font-medium tracking-wide thinking-gradient select-none">
-      讀取圖片中…
+      Analyzing image...
     </span>
   );
 }
