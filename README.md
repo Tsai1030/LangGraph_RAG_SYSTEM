@@ -5,7 +5,7 @@
 - **RAG 問答 + 表單代填**（原系統）— 營造規範檢索、Adaptive RAG、CRAG 閉環、靜態 / 動態表單下載與 AI 代填
 - **鋼筋盤價助理**（SEARCH 模組）— 每週鋼筋採購週會 Word 自動產出：豐興開盤、國際廢鋼、中鋼月/季盤、各種敘述段落、歷史價格表
 
-公開網址（內部用）：`https://kccc3798.tail138ec9.ts.net`
+公開網址（內部用）：`https://kccw0077.tail138ec9.ts.net:8443`
 
 ---
 
@@ -30,7 +30,7 @@
                        使用者瀏覽器
                             │
                             ▼
-        https://kccc3798.tail138ec9.ts.net (Tailscale Funnel)
+        https://kccw0077.tail138ec9.ts.net:8443 (Tailscale Funnel)
                             │
                             ▼
                       Caddy :9000
@@ -352,7 +352,7 @@ uv run python scripts/05_embed_ingest.py
 ```
 網際網路
     │
-    ▼  https://kccc3798.tail138ec9.ts.net (HTTPS — Tailscale 簽憑證)
+    ▼  https://kccw0077.tail138ec9.ts.net:8443 (HTTPS — Tailscale 簽憑證)
 Tailscale Funnel
     │
     ▼  本機 :9000
@@ -449,7 +449,7 @@ pm2 restart all
 
 # 6. 驗證
 tailscale funnel status
-curl https://kccc3798.tail138ec9.ts.net/api/health
+curl https://kccw0077.tail138ec9.ts.net:8443/api/health
 ```
 
 ---

@@ -39,7 +39,7 @@ echo.
 echo ============================================
 echo   Maintenance mode is ACTIVE
 echo ============================================
-echo   URL: https://kccc3798.tail138ec9.ts.net/
+echo   URL: https://kccw0077.tail138ec9.ts.net:8443/
 echo.
 echo   When migration is done:
 echo     1. Close the 'Maintenance Server' window  (Ctrl+C inside it)

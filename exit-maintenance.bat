@@ -32,7 +32,7 @@ echo.
 echo ============================================
 echo   Maintenance mode OFF.
 echo   Frontend will be live in ~20 seconds.
-echo   URL: https://kccc3798.tail138ec9.ts.net/
+echo   URL: https://kccw0077.tail138ec9.ts.net:8443/
 echo ============================================
 echo.
 pause

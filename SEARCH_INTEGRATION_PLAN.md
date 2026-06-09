@@ -36,7 +36,7 @@
 
 ### 0.1 RAG 系統正在生產（不能中斷）
 
-- `C:\Users\226376\Desktop\data` 目前**正在線上服務**：PM2 跑 backend:8000 + frontend:3000，Caddy :9000 → Tailscale Funnel → `https://kccc3798.tail138ec9.ts.net`
+- `C:\Users\226376\Desktop\data` 目前**正在線上服務**：PM2 跑 backend:8000 + frontend:3000，Caddy :9000 → Tailscale Funnel → `https://kccw0077.tail138ec9.ts.net:8443`
 - **絕對不可以**直接在這個資料夾改檔（會觸發 Next.js 熱重載、可能讓使用者看到半成品 / 短暫 5xx）
 - **必須使用 git worktree** 把整合工作隔離出去
 
@@ -736,7 +736,7 @@ pm2 restart all
 
 # Step 6.4.6 — Smoke
 tailscale funnel status
-curl https://kccc3798.tail138ec9.ts.net/api/health
+curl https://kccw0077.tail138ec9.ts.net:8443/api/health
 # 開瀏覽器測登入 + RAG 聊天 + search 頁面
 ```
 
@@ -778,7 +778,7 @@ cd ..
 # 7) 重啟
 pm2 restart all
 tailscale funnel status
-curl https://kccc3798.tail138ec9.ts.net/api/health
+curl https://kccw0077.tail138ec9.ts.net:8443/api/health
 ```
 
 **Rollback 後該做：**
