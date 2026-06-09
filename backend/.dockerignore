@@ -1,0 +1,19 @@
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+.env
+.env.*
+# SQLite files (DB is PostgreSQL in Docker)
+*.db
+*.db-shm
+*.db-wal
+# Runtime data (bind-mounted as volumes)
+data/uploads/
+data/search_outputs/
+data/generated_forms/
+# Dev/test artifacts
+tests/
+scripts/output/
+chroma_db/
+chroma_dev_db/

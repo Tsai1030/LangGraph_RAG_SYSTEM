@@ -1,0 +1,77 @@
+services:
+
+  # ── PostgreSQL ────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: kb_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: kb_app
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kb_user -d kb_app"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - app-net
+
+  # ── Backend (FastAPI) ─────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env.docker
+    volumes:
+      - ./backend/data/uploads:/app/data/uploads
+      - ./backend/data/search_outputs:/app/data/search_outputs
+      - ./backend/data/generated_forms:/app/data/generated_forms
+    networks:
+      - app-net
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  # ── Frontend (Next.js standalone) ─────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    networks:
+      - app-net
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  # ── nginx (reverse proxy) ─────────────────────────────────
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - app-net
+    depends_on:
+      - frontend
+      - backend
+
+networks:
+  app-net:
+    driver: bridge
+
+volumes:
+  pg_data:
