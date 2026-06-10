@@ -25,6 +25,7 @@ from langchain_core.messages import HumanMessage # 建立langchain/langraph用�
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_current_user
+from app.core.rate_limit import limiter, user_or_ip_key
 from app.database import AsyncSessionLocal, get_db
 from app.models.user import User
 from app.schemas.chat import ChatRequest
@@ -63,7 +64,9 @@ NODE_STEP_LABELS: dict[str, str] = {
 
 
 @router.post("/upload")
+@limiter.limit("30/minute", key_func=user_or_ip_key)
 async def chat_upload(
+    request: Request,
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
 ):
@@ -81,7 +84,9 @@ async def chat_upload(
 
 
 @router.post("/transcribe")
+@limiter.limit("15/minute", key_func=user_or_ip_key)
 async def chat_transcribe(
+    request: Request,
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
 ):
@@ -127,6 +132,7 @@ async def chat_image(
 
 
 @router.post("/stream")
+@limiter.limit("20/minute", key_func=user_or_ip_key)
 async def chat_stream(
     request: Request,
     body: ChatRequest,
