@@ -211,7 +211,11 @@ async def chat_stream(
                 or prev_state.values.get("prev_image_understanding")
             )
     except Exception:
-        pass
+        # 非致命：拿不到前輪 state 就少了多輪延續，但本輪對話照常進行
+        logger.warning(
+            "[chat_stream] 讀取前輪 state 失敗 conv=%s（多輪表單/圖片延續本輪失效）",
+            conversation_id, exc_info=True,
+        )
 
     # ── 解析本輪上傳圖片（VLM）→ 只放輕量參照，base64 不進 state ──
     image_refs = [
@@ -310,8 +314,7 @@ async def chat_stream(
             except Exception as exc:
                 had_error = True
                 # 細節記 log；前端只給通用英文錯誤訊息（避免內部訊息洩漏）
-                import logging
-                logging.getLogger("app.chat").exception(
+                logger.exception(
                     "[chat_stream] graph error in conv=%s: %s",
                     conversation_id, exc,
                 )
@@ -325,7 +328,11 @@ async def chat_stream(
                     final = await graph.aget_state(config)
                     final_values = final.values if final else {}
                 except Exception:
-                    pass  # 讀取失敗保留空 dict，不影響已串流文字
+                    # 讀取失敗保留空 dict，不影響已串流文字（但 sources/form 事件會缺漏）
+                    logger.warning(
+                        "[chat_stream] 讀取最終 state 失敗 conv=%s（sources/form 事件略過）",
+                        conversation_id, exc_info=True,
+                    )
 
                 sources = final_values.get("sources", [])
                 if sources:
@@ -399,7 +406,11 @@ async def chat_stream(
                             output_tokens=total_output_tokens or None,
                         )
                 except Exception:
-                    pass  # 儲存失敗不影響已完成的串流
+                    # 儲存失敗不影響已完成的串流，但對話紀錄會缺這則回覆 — 必須記 log
+                    logger.exception(
+                        "[chat_stream] 儲存 AI 回覆失敗 conv=%s（%d 字未入庫）",
+                        conversation_id, len(assistant_response),
+                    )
 
         finally:
             _chat_semaphore.release()
