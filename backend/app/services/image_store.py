@@ -14,6 +14,7 @@ from pathlib import Path
 from fastapi import UploadFile
 
 from app.config import settings
+from app.services.upload_guard import read_limited, sniff_image_mime
 
 # 允許的圖片 mime → 副檔名（Stage 0 已驗證 Gemini 讀 png；jpeg/webp 一併支援）
 _ALLOWED_MIME = {
@@ -33,20 +34,29 @@ def _user_dir(user_id: str) -> Path:
 async def save_upload(user_id: str, file: UploadFile) -> dict:
     """存一張上傳圖片，回傳 {image_id, mime_type}。
 
-    驗證 mime 與大小；檔名用 server 端 uuid（不信任 client 檔名）。
+    驗證：client mime 先快篩 → 分塊讀（超限即斷）→ magic bytes 判實際格式
+    （以 sniff 結果為準，不信任 client 宣告）。檔名用 server 端 uuid。
     驗證失敗丟 ValueError（由 endpoint 轉成 400）。
     """
-    mime = (file.content_type or "").lower()
-    ext = _ALLOWED_MIME.get(mime)
-    if not ext:
-        raise ValueError(f"不支援的圖片類型：{mime or 'unknown'}（僅 png/jpeg/webp）")
+    claimed = (file.content_type or "").lower()
+    if claimed not in _ALLOWED_MIME:
+        raise ValueError(f"不支援的圖片類型：{claimed or 'unknown'}（僅 png/jpeg/webp）")
 
-    data = await file.read()
-    if not data:
-        raise ValueError("空檔案")
-    if len(data) > _MAX_BYTES:
-        raise ValueError(f"圖片過大（{len(data)} bytes，上限 {_MAX_BYTES}）")
+    try:
+        data = await read_limited(file, _MAX_BYTES)
+    except ValueError as e:
+        raise ValueError(f"圖片{e}") from e
 
+    mime = sniff_image_mime(data)
+    if mime is None or mime not in _ALLOWED_MIME:
+        raise ValueError("圖片內容與允許格式不符（僅 png/jpeg/webp）")
+    if mime != claimed:
+        import logging
+        logging.getLogger("app.upload").warning(
+            "[save_upload] client 宣告 %s 但實際為 %s，以實際格式為準", claimed, mime
+        )
+
+    ext = _ALLOWED_MIME[mime]
     image_id = uuid.uuid4().hex
     (_user_dir(user_id) / f"{image_id}{ext}").write_bytes(data)
     return {"image_id": image_id, "mime_type": mime}

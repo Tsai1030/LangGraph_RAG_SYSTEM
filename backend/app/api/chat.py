@@ -33,8 +33,9 @@ from app.services.conversation_service import (
     get_summary,
     save_message,
 )
-from app.services.audio_transcribe import transcribe_audio
+from app.services.audio_transcribe import MAX_AUDIO_BYTES, transcribe_audio
 from app.services.image_store import resolve_image, save_upload
+from app.services.upload_guard import read_limited, sniff_audio_ok
 
 logger = logging.getLogger("app.chat")
 
@@ -90,9 +91,16 @@ async def chat_transcribe(
     這裡用 AUDIO_MODEL（Gemini 多模態）轉文字，前端填回輸入框讓使用者
     確認後再送出。音訊不落磁碟、不進 checkpoint。
     """
-    data = await file.read()
     try:
-        text = await transcribe_audio(data, file.content_type or "")
+        data = await read_limited(file, MAX_AUDIO_BYTES)
+        mime = file.content_type or ""
+        if not sniff_audio_ok(data, mime):
+            # 檔頭不像合法音訊 container：只記警告不擋（codec 變異多，誤殺成本高）
+            logger.warning(
+                "[transcribe] 音訊檔頭與宣告 mime=%s 不符（%d bytes），仍嘗試轉錄",
+                mime, len(data),
+            )
+        text = await transcribe_audio(data, mime)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
