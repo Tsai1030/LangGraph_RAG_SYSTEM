@@ -23,6 +23,10 @@ from app.services.image_store import to_image_block
 
 logger = logging.getLogger("app.vision")
 
+# 併入 query 的解析文字上限：query 驅動檢索 embedding，整頁 OCR 全文
+# 併入會稀釋檢索訊號。完整解析仍存 image_understanding 供 responder 用全文。
+_MAX_QUERY_MERGE = 500
+
 _SYSTEM = (
     "你是影像理解助手。請只『描述 / OCR』使用者上傳的圖片內容："
     "把標題、表格欄位與數值（逐列）、流程圖節點、關鍵中文文字、手寫/印章資訊"
@@ -74,8 +78,10 @@ async def vision_intake(state: GraphState) -> dict:
     if not understanding.strip():
         return {}
 
-    enriched = f"{query}\n\n[使用者上傳圖片的內容解析]\n{understanding}".strip()
+    merged = understanding[:_MAX_QUERY_MERGE]
+    enriched = f"{query}\n\n[使用者上傳圖片的內容解析]\n{merged}".strip()
     logger.info(
-        "[vision_intake] %d 張圖，解析 %d 字，已併入 query", len(blocks), len(understanding)
+        "[vision_intake] %d 張圖，解析 %d 字（併入 query %d 字）",
+        len(blocks), len(understanding), len(merged),
     )
     return {"image_understanding": understanding, "query": enriched}
