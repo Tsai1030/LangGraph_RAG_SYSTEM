@@ -3,7 +3,7 @@ vision.py — vision_intake 節點（VLM 圖片輸入）
 
 放在 graph 最前面（START → vision_intake → compact_check）：
 - 本輪無圖（image_refs 空）→ return {}（no-op，純文字流程逐位元不變）。
-- 本輪有圖 → 用 get_llm("default")（Gemini，多模態）讀圖，產出文字解析，
+- 本輪有圖 → 用 get_llm("vision")（VISION_MODEL，預設 Gemini 多模態）讀圖，產出文字解析，
   併入 state["query"]、另存 state["image_understanding"]，讓後續既有節點
   （unified_intent / retriever / grader）照常處理「文字」，邏輯零改動。
 
@@ -57,7 +57,7 @@ async def vision_intake(state: GraphState) -> dict:
     content = [{"type": "text", "text": user_text}, *blocks]
 
     try:
-        llm = get_llm("default", temperature=0)
+        llm = get_llm("vision", temperature=0)
         resp = await llm.ainvoke([
             SystemMessage(content=_SYSTEM),
             HumanMessage(content=content),

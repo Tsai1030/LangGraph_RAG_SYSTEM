@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     llm_model: str = "openai:gpt-5.4"
     grader_model: str = "openai:gpt-5.4-mini"
     form_model: str = "openai:gpt-5.4"
+    # 圖片解析（vision_intake 節點讀圖/OCR）— 獨立於主對話 LLM，預設 Gemini 多模態
+    vision_model: str = "google_genai:gemini-3.5-flash"
     embedding_model: str = "text-embedding-3-small"
 
     # 其他 LLM provider keys — 只有當對應 *_model 用到該 provider 才需要設
