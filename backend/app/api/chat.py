@@ -16,6 +16,7 @@ from __future__ import annotations # python 未來性設定，型別註記處理
 
 import asyncio
 import json # 把dict轉成json因為sse stream
+import logging
 from typing import AsyncGenerator
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
@@ -32,7 +33,10 @@ from app.services.conversation_service import (
     get_summary,
     save_message,
 )
+from app.services.audio_transcribe import transcribe_audio
 from app.services.image_store import resolve_image, save_upload
+
+logger = logging.getLogger("app.chat")
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -73,6 +77,33 @@ async def chat_upload(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
         )
+
+
+@router.post("/transcribe")
+async def chat_transcribe(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
+    """POST /api/chat/transcribe — 語音輸入（STT），回 {text}。
+
+    方案 A：轉錄在進 graph 之前完成，graph / state 零改動。前端錄音上傳，
+    這裡用 AUDIO_MODEL（Gemini 多模態）轉文字，前端填回輸入框讓使用者
+    確認後再送出。音訊不落磁碟、不進 checkpoint。
+    """
+    data = await file.read()
+    try:
+        text = await transcribe_audio(data, file.content_type or "")
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+        )
+    except Exception:
+        # STT 失敗不應曝露內部錯誤細節；前端顯示通用訊息即可
+        logger.exception("[transcribe] STT 轉錄失敗")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail="語音轉錄失敗，請重試"
+        )
+    return {"text": text}
 
 
 @router.get("/image/{image_id}")

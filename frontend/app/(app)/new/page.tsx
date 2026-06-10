@@ -8,6 +8,7 @@ import api from "@/lib/api";
 import { useChatStore } from "@/store/chatStore";
 import type { ConversationOut, PendingImage } from "@/types";
 import FormPickerButton from "@/components/chat/FormPickerButton";
+import VoiceInputButton, { type VoiceState } from "@/components/chat/VoiceInputButton";
 
 const SUGGESTIONS = [
   { q: "工地施工動線規劃", icon: Route },
@@ -22,6 +23,9 @@ export default function NewPage() {
   const [creating, setCreating] = useState(false);
   const [value, setValue] = useState("");
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
+  // ── 語音輸入（STT）：VoiceInputButton 錄音轉錄，這裡只管 placeholder 與錯誤顯示 ──
+  const [recState, setRecState] = useState<VoiceState>("idle");
+  const [sttError, setSttError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const addImage = (img: PendingImage) =>
@@ -36,6 +40,17 @@ export default function NewPage() {
   const autoResize = (el: HTMLTextAreaElement) => {
     el.style.height = "auto";
     el.style.height = Math.min(el.scrollHeight, 180) + "px";
+  };
+
+  const handleTranscript = (text: string) => {
+    setValue((v) => (v.trim() ? v.trimEnd() + " " + text : text));
+    // setValue 後 textarea 內容下一個 frame 才更新，再調整高度
+    requestAnimationFrame(() => {
+      if (textareaRef.current) {
+        autoResize(textareaRef.current);
+        textareaRef.current.focus();
+      }
+    });
   };
 
   const handleSend = useCallback(async (text: string, imageIds: string[] = []) => {
@@ -106,10 +121,20 @@ export default function NewPage() {
             }
           }}
           disabled={creating}
-          placeholder={placeholder}
+          placeholder={
+            recState === "recording" ? "錄音中…再按一下麥克風結束"
+            : recState === "transcribing" ? "語音轉錄中…"
+            : placeholder
+          }
           rows={1}
           className="flex-1 text-base text-zinc-800 placeholder-zinc-400 bg-transparent outline-none resize-none leading-relaxed disabled:cursor-not-allowed"
           style={{ maxHeight: "180px", overflowY: "auto" }}
+        />
+        <VoiceInputButton
+          disabled={creating}
+          onTranscript={handleTranscript}
+          onStateChange={setRecState}
+          onError={setSttError}
         />
         <button
           onClick={() => handleSend(value, pendingImages.map((p) => p.image_id))}
@@ -123,6 +148,10 @@ export default function NewPage() {
           <ArrowUp size={14} className={canSend ? "text-white" : "text-zinc-400"} />
         </button>
       </div>
+
+      {sttError && (
+        <p className="px-1 text-[12px] text-rose-500">{sttError}</p>
+      )}
     </div>
   );
 

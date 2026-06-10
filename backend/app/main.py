@@ -128,6 +128,7 @@ async def lifespan(app: FastAPI):
         print(f"[Startup] GRADER_MODEL={settings.grader_model}")
         print(f"[Startup] FORM_MODEL={settings.form_model}")
         print(f"[Startup] VISION_MODEL={settings.vision_model}")
+        print(f"[Startup] AUDIO_MODEL={settings.audio_model}")
         print(f"[Startup] EMBEDDING_MODEL={settings.embedding_model}")
 
         await _bootstrap_initial_admin()

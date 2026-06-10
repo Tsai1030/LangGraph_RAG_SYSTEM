@@ -4,6 +4,7 @@ import { useRef, useState, useEffect } from "react";
 import { ArrowUp, Square, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import FormPickerButton from "./FormPickerButton";
+import VoiceInputButton, { type VoiceState } from "./VoiceInputButton";
 import type { PendingImage } from "@/types";
 
 interface Props {
@@ -17,6 +18,9 @@ export default function InputBar({ onSend, onStop, isStreaming, disabled }: Prop
   const [value, setValue] = useState("");
   const [isMobile, setIsMobile] = useState(false);
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
+  // ── 語音輸入（STT）：VoiceInputButton 錄音轉錄，這裡只管 placeholder 與錯誤顯示 ──
+  const [recState, setRecState] = useState<VoiceState>("idle");
+  const [sttError, setSttError] = useState<string | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -25,6 +29,11 @@ export default function InputBar({ onSend, onStop, isStreaming, disabled }: Prop
     window.addEventListener("resize", check);
     return () => window.removeEventListener("resize", check);
   }, []);
+
+  const handleTranscript = (text: string) => {
+    setValue((v) => (v.trim() ? v.trimEnd() + " " + text : text));
+    ref.current?.focus();
+  };
 
   useEffect(() => {
     const el = ref.current;
@@ -102,10 +111,23 @@ export default function InputBar({ onSend, onStop, isStreaming, disabled }: Prop
                 if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
               }}
               disabled={disabled}
-              placeholder={isStreaming ? "回覆中…" : isMobile ? "想問就問" : "輸入問題，例如：動員開工需要哪些初期計畫？"}
+              placeholder={
+                recState === "recording" ? "錄音中…再按一下麥克風結束"
+                : recState === "transcribing" ? "語音轉錄中…"
+                : isStreaming ? "回覆中…"
+                : isMobile ? "想問就問"
+                : "輸入問題，例如：動員開工需要哪些初期計畫？"
+              }
               rows={1}
               className="flex-1 text-base text-zinc-800 placeholder-zinc-400 bg-transparent outline-none resize-none leading-relaxed disabled:cursor-not-allowed"
               style={{ maxHeight: "180px", overflowY: "auto" }}
+            />
+
+            <VoiceInputButton
+              disabled={disabled || isStreaming}
+              onTranscript={handleTranscript}
+              onStateChange={setRecState}
+              onError={setSttError}
             />
 
             {isStreaming ? (
@@ -130,6 +152,10 @@ export default function InputBar({ onSend, onStop, isStreaming, disabled }: Prop
               </button>
             )}
           </div>
+
+          {sttError && (
+            <p className="px-1 text-[12px] text-rose-500">{sttError}</p>
+          )}
         </div>
         <p className="text-center text-[11px] text-zinc-400 mt-1.5 select-none">
           AI有時會犯錯·需要二次查驗
