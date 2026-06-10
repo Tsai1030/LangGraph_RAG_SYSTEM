@@ -1,3 +1,5 @@
+import asyncio
+import contextlib
 import logging
 import mimetypes
 import os
@@ -9,7 +11,6 @@ from contextlib import asynccontextmanager
 # run on the default ProactorEventLoop. Must be set BEFORE asyncio/
 # uvicorn create the loop, so do it at the very top of main.py.
 if sys.platform == "win32":
-    import asyncio
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 _app_logger = logging.getLogger("app")
@@ -86,6 +87,30 @@ async def _bootstrap_initial_admin() -> None:
         print(f"[Bootstrap] Promoted {user.email} to admin")
 
 
+async def _periodic_cleanup() -> None:
+    """每日清理：上傳圖片（30 天）+ 產出表單檔（30 天）。
+
+    取代原本「啟動時掃一次」的做法 — PM2 長駐不重啟時也能持續清理。
+    迴圈先清再睡，保留原啟動掃描行為。best-effort：失敗只記 log，下一輪再試。
+    """
+    from app.services.form_fill_writer import cleanup_old_generated
+    from app.services.image_store import cleanup_old_uploads
+
+    while True:
+        try:
+            # 磁碟掃描走 thread，避免大量檔案時卡住 event loop
+            removed_uploads = await asyncio.to_thread(cleanup_old_uploads)
+            removed_generated = await asyncio.to_thread(cleanup_old_generated)
+            if removed_uploads or removed_generated:
+                _app_logger.info(
+                    "[cleanup] removed %d old upload(s), %d old generated form(s)",
+                    removed_uploads, removed_generated,
+                )
+        except Exception:
+            _app_logger.exception("[cleanup] periodic cleanup failed")
+        await asyncio.sleep(86400)
+
+
 @asynccontextmanager
 async def _make_checkpointer():
     """Yield a LangGraph checkpointer appropriate for the configured backend.
@@ -133,14 +158,8 @@ async def lifespan(app: FastAPI):
 
         await _bootstrap_initial_admin()
 
-        # ─── VLM 上傳圖片清理（best-effort；刪除 30 天以上舊上傳，避免磁碟長期累積）───
-        try:
-            from app.services.image_store import cleanup_old_uploads
-            _removed = cleanup_old_uploads()
-            if _removed:
-                print(f"[Startup] cleaned {_removed} old upload image(s)")
-        except Exception:
-            logging.getLogger("app").exception("[Startup] upload cleanup failed")
+        # ─── 每日清理任務（上傳圖 + 產出表單；啟動即先掃一輪）───
+        cleanup_task = asyncio.create_task(_periodic_cleanup())
 
         # ─── SEARCH module bootstrap ───
         # Side-effect imports:
@@ -180,6 +199,9 @@ async def lifespan(app: FastAPI):
         try:
             yield
         finally:
+            cleanup_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await cleanup_task
             await search_engine.dispose()
     # yield 結束（server 關閉）後，async with 自動關閉 conn
 
