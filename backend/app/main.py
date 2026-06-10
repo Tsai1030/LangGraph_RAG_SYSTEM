@@ -227,24 +227,35 @@ app.include_router(search_usage.router, prefix="/api")
 _img_dir = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "data_markdown", "img")
 )
+_IMG_BASE = Path(_img_dir).resolve()
 
 
-@app.get("/api/images/{image_path:path}")
-async def serve_image(image_path: str):
+def _contained_file(candidate: Path) -> Path | None:
+    """resolve 後確認仍在 img/ 內且為檔案；否則 None。
+
+    用 is_relative_to 而非字串 startswith — 字串比對會被同層的
+    img_xxx 兄弟目錄與 .. 穿越繞過。
     """
-    圖片服務端點，支援兩種目錄結構：
+    resolved = candidate.resolve()
+    if resolved.is_relative_to(_IMG_BASE) and resolved.is_file():
+        return resolved
+    return None
+
+
+def _resolve_kb_image(image_path: str) -> Path | None:
+    """解析 KB 圖片路徑，支援兩種目錄結構：
     1. img/<folder>/<file>.png          （無括號，直接存取）
     2. img/<folder with date>/<folder>/<file>.png （有括號的父目錄，多一層）
 
     解析策略：先試直接路徑，找不到就在 img/ 下搜尋同名子目錄。
+    不在 img/ 內（路徑穿越）或檔案不存在 → None。
     """
-    if not os.path.isdir(_img_dir):
-        raise HTTPException(status_code=404, detail="Image directory not found")
+    if not _IMG_BASE.is_dir():
+        return None
 
     # 1. 直接路徑（現有可運作的路徑）
-    direct = os.path.normpath(os.path.join(_img_dir, image_path))
-    if direct.startswith(_img_dir) and os.path.isfile(direct):
-        return FileResponse(direct)
+    if found := _contained_file(_IMG_BASE / image_path):
+        return found
 
     # 2. 搜尋：image_path = "010102工務所辦公室設置/017.png"
     #    → parts[0] = "010102工務所辦公室設置", filename = "017.png"
@@ -252,24 +263,31 @@ async def serve_image(image_path: str):
     if len(parts) >= 2:
         target_folder = parts[0]
         sub_path = "/".join(parts[1:])
-        for entry in os.scandir(_img_dir):
+        for entry in os.scandir(_IMG_BASE):
             if not entry.is_dir():
                 continue
             # 找名稱以 target_folder 開頭的父目錄（含括號版本）
             if entry.name.startswith(target_folder):
-                candidate = os.path.normpath(
-                    os.path.join(entry.path, target_folder, sub_path)
-                )
-                if candidate.startswith(_img_dir) and os.path.isfile(candidate):
-                    return FileResponse(candidate)
+                if found := _contained_file(Path(entry.path) / target_folder / sub_path):
+                    return found
                 # 也試不含 target_folder 中間層的路徑
-                candidate2 = os.path.normpath(
-                    os.path.join(entry.path, sub_path)
-                )
-                if candidate2.startswith(_img_dir) and os.path.isfile(candidate2):
-                    return FileResponse(candidate2)
+                if found := _contained_file(Path(entry.path) / sub_path):
+                    return found
 
-    raise HTTPException(status_code=404, detail=f"Image not found: {image_path}")
+    return None
+
+
+@app.get("/api/images/{image_path:path}")
+async def serve_image(
+    image_path: str,
+    current_user: User = Depends(get_current_user),
+):
+    """KB 圖片服務端點（聊天回覆中的知識庫附圖）。需登入 — 前端
+    MessageBubble 對 /api/ 開頭的圖改用 AuthImage 帶 token 抓 blob。"""
+    path = _resolve_kb_image(image_path)
+    if path is None:
+        raise HTTPException(status_code=404, detail=f"Image not found: {image_path}")
+    return FileResponse(str(path))
 
 
 @app.get("/api/forms")

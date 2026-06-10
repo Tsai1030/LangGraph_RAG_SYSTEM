@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -216,15 +216,27 @@ function createMarkdownComponents(onImageClick: (src: string, alt: string) => vo
     img: (props) => {
       const src = typeof props.src === "string" ? props.src : undefined;
       const alt = typeof props.alt === "string" ? props.alt : "";
+      // 後端 KB 圖（/api/images/...）需要認證 → AuthImage 帶 token 抓 blob；
+      // 其餘外部圖維持普通 <img>
+      const isApiImage = src?.startsWith("/api/");
       return (
         <figure className="my-3">
-          <img
-            src={src}
-            alt={alt}
-            className="max-w-full rounded-lg border border-zinc-200 shadow-sm cursor-zoom-in"
-            onClick={() => src && onImageClick(src, alt)}
-            onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-          />
+          {isApiImage ? (
+            <AuthImage
+              src={src}
+              alt={alt}
+              className="max-w-full rounded-lg border border-zinc-200 shadow-sm cursor-zoom-in"
+              onClick={(url) => onImageClick(url, alt)}
+            />
+          ) : (
+            <img
+              src={src}
+              alt={alt}
+              className="max-w-full rounded-lg border border-zinc-200 shadow-sm cursor-zoom-in"
+              onClick={() => src && onImageClick(src, alt)}
+              onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+            />
+          )}
           {alt && <figcaption className="text-[11px] text-zinc-400 mt-1.5 text-center">{alt}</figcaption>}
         </figure>
       );
@@ -270,7 +282,12 @@ export default function MessageBubble({
 
   const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
   const handleImageClick = useCallback((src: string, alt: string) => setLightbox({ src, alt }), []);
-  const markdownComponents = createMarkdownComponents(handleImageClick);
+  // useMemo 必要：串流時每個 token 觸發重渲染，若 components 物件每次都是新
+  // identity，react-markdown 會把所有圖片元件 unmount/remount → AuthImage 重打 API
+  const markdownComponents = useMemo(
+    () => createMarkdownComponents(handleImageClick),
+    [handleImageClick]
+  );
 
   if (isUser) {
     const images = message.meta?.images ?? [];
