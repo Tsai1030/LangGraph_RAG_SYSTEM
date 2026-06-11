@@ -38,6 +38,7 @@ export interface MessageMeta {
   form_files?: FormFile[];
   token_count?: number;
   images?: { image_id: string; mime?: string }[]; // 使用者上傳圖片（泡泡縮圖；用 /api/chat/image/{id} 顯示）
+  documents?: { document_id: string; filename: string; size?: number }[]; // 使用者上傳文件（泡泡卡片，與 InputBar DocumentCard 同設計）
 }
 
 export interface ConversationDetail {
@@ -71,6 +72,14 @@ export interface PendingImage {
   mime_type: string;
   preview_url: string; // 本地 object URL，供縮圖預覽
   name: string;
+}
+
+// 待送出的已上傳文件（PDF/DOCX/PPTX；上傳當下後端已完成解析與索引）
+export interface PendingDocument {
+  document_id: string; // status="uploading" 時為前端暫時 id，完成後換成後端 id
+  filename: string;
+  size?: number; // bytes，前端卡片顯示用
+  status?: "uploading" | "ready"; // 未填視為 ready
 }
 
 // SSE Events

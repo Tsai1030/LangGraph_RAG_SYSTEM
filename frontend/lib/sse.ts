@@ -25,6 +25,7 @@ export async function streamChat(
   signal?: AbortSignal,
   imageIds: string[] = [],
   onStep?: (node: string, label: string) => void,
+  documentIds: string[] = [],
 ): Promise<void> {
   let token = getAccessToken();
 
@@ -38,7 +39,12 @@ export async function streamChat(
         "Content-Type": "application/json",
         ...(t ? { Authorization: `Bearer ${t}` } : {}),
       },
-      body: JSON.stringify({ conversation_id: conversationId, message, image_ids: imageIds }),
+      body: JSON.stringify({
+        conversation_id: conversationId,
+        message,
+        image_ids: imageIds,
+        document_ids: documentIds,
+      }),
       signal,
     });
 

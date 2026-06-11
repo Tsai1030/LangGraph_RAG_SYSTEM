@@ -68,23 +68,18 @@ async def rebuild_bm25() -> int:
 
 
 def rrf(
-    vector_hits: list[dict],
-    bm25_hits: list[dict],
+    *hit_lists: list[dict],
     k: int = 60,
 ) -> list[dict]:
-    """Reciprocal Rank Fusion：合併兩個排序清單。"""
+    """Reciprocal Rank Fusion：合併任意數量的排序清單（向量 / BM25 / session）。"""
     scores: dict[str, float] = {}
     id_to_chunk: dict[str, dict] = {}
 
-    for rank, chunk in enumerate(vector_hits):
-        cid = chunk["id"]
-        scores[cid] = scores.get(cid, 0.0) + 1.0 / (k + rank + 1)
-        id_to_chunk[cid] = chunk
-
-    for rank, chunk in enumerate(bm25_hits):
-        cid = chunk["id"]
-        scores[cid] = scores.get(cid, 0.0) + 1.0 / (k + rank + 1)
-        id_to_chunk[cid] = chunk
+    for hits in hit_lists:
+        for rank, chunk in enumerate(hits):
+            cid = chunk["id"]
+            scores[cid] = scores.get(cid, 0.0) + 1.0 / (k + rank + 1)
+            id_to_chunk[cid] = chunk
 
     return [
         id_to_chunk[cid]

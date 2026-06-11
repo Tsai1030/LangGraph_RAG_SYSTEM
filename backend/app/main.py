@@ -88,11 +88,12 @@ async def _bootstrap_initial_admin() -> None:
 
 
 async def _periodic_cleanup() -> None:
-    """每日清理：上傳圖片（30 天）+ 產出表單檔（30 天）。
+    """每日清理：上傳圖片/文件（30 天）+ 產出表單檔（30 天）+ 文件 session 索引（30 天）。
 
     取代原本「啟動時掃一次」的做法 — PM2 長駐不重啟時也能持續清理。
     迴圈先清再睡，保留原啟動掃描行為。best-effort：失敗只記 log，下一輪再試。
     """
+    from app.rag.session_store import cleanup_old_sessions
     from app.services.form_fill_writer import cleanup_old_generated
     from app.services.image_store import cleanup_old_uploads
 
@@ -101,10 +102,11 @@ async def _periodic_cleanup() -> None:
             # 磁碟掃描走 thread，避免大量檔案時卡住 event loop
             removed_uploads = await asyncio.to_thread(cleanup_old_uploads)
             removed_generated = await asyncio.to_thread(cleanup_old_generated)
-            if removed_uploads or removed_generated:
+            removed_sessions = await asyncio.to_thread(cleanup_old_sessions)
+            if removed_uploads or removed_generated or removed_sessions:
                 _app_logger.info(
-                    "[cleanup] removed %d old upload(s), %d old generated form(s)",
-                    removed_uploads, removed_generated,
+                    "[cleanup] removed %d old upload(s), %d old generated form(s), %d old session index(es)",
+                    removed_uploads, removed_generated, removed_sessions,
                 )
         except Exception:
             _app_logger.exception("[cleanup] periodic cleanup failed")

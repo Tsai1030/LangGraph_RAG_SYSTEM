@@ -19,7 +19,7 @@ import json # 把dict轉成json因為sse stream
 import logging
 from typing import AsyncGenerator
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse, StreamingResponse
 from langchain_core.messages import HumanMessage # 建立langchain/langraph用的使用者訊息格式
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,6 +35,7 @@ from app.services.conversation_service import (
     save_message,
 )
 from app.services.audio_transcribe import MAX_AUDIO_BYTES, transcribe_audio
+from app.services.document_store import resolve_document, save_document_upload
 from app.services.image_store import resolve_image, save_upload
 from app.services.upload_guard import read_limited, sniff_audio_ok
 
@@ -77,6 +78,40 @@ async def chat_upload(
     """
     try:
         return await save_upload(str(current_user.id), file)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+        )
+
+
+@router.post("/upload-document")
+@limiter.limit("10/minute", key_func=user_or_ip_key)
+async def chat_upload_document(
+    request: Request,
+    file: UploadFile = File(...),
+    conversation_id: str = Form(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """POST /api/chat/upload-document — 上傳 PDF/DOCX/PPTX，回
+    {document_id, filename, chunk_count}。
+
+    文件在此 endpoint 內完成 markitdown 解析 + chunk + embed 進對話專屬
+    向量索引（session_{conversation_id}），回傳即代表可檢索。送訊息時把
+    document_id 放進 ChatRequest.document_ids。
+    """
+    from app.services.conversation_service import get_conversation
+    try:
+        await get_conversation(db, conversation_id, str(current_user.id))
+    except HTTPException:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found",
+        )
+    try:
+        return await save_document_upload(
+            str(current_user.id), conversation_id, file
+        )
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
@@ -170,12 +205,23 @@ async def chat_stream(
         )
     await _chat_semaphore.acquire()
 
-    # ── 2. 儲存使用者訊息（含本輪上傳圖片，供泡泡縮圖；重整後仍可顯示）──
-    user_meta = (
-        {"images": [{"image_id": iid} for iid in body.image_ids]}
-        if body.image_ids else None
+    # ── 2. 儲存使用者訊息（含本輪上傳圖片/文件，供泡泡顯示；重整後仍可顯示）──
+    # 文件附件先 resolve（同時取得原始檔名供泡泡 chip 顯示）
+    document_refs = [
+        ref for did in body.document_ids
+        if (ref := resolve_document(user_id, did)) is not None
+    ]
+    user_meta: dict = {}
+    if body.image_ids:
+        user_meta["images"] = [{"image_id": iid} for iid in body.image_ids]
+    if document_refs:
+        user_meta["documents"] = [
+            {"document_id": r["id"], "filename": r["filename"], "size": r.get("size")}
+            for r in document_refs
+        ]
+    await save_message(
+        db, conversation_id, "user", body.message, metadata=user_meta or None
     )
-    await save_message(db, conversation_id, "user", body.message, metadata=user_meta)
 
     # ── 3. 自動設定對話標題（首次訊息） ──────────────────────
     await auto_set_title(db, conversation_id, body.message)
@@ -193,6 +239,7 @@ async def chat_stream(
     prev_form_data = None
     prev_image_refs: list = []
     prev_image_understanding = None
+    prev_document_refs: list = []
     try:
         prev_state = await graph.aget_state(config)
         if prev_state and prev_state.values:
@@ -210,6 +257,13 @@ async def chat_stream(
                 prev_state.values.get("image_understanding")
                 or prev_state.values.get("prev_image_understanding")
             )
+            # 多輪文件延續：本輪無新文件時沿用（session 索引本就持久，refs 供
+            # intent 提示與 retriever 觸發雙索引查詢）
+            prev_document_refs = (
+                prev_state.values.get("document_refs")
+                or prev_state.values.get("prev_document_refs")
+                or []
+            )
     except Exception:
         # 非致命：拿不到前輪 state 就少了多輪延續，但本輪對話照常進行
         logger.warning(
@@ -222,6 +276,16 @@ async def chat_stream(
         ref for iid in body.image_ids
         if (ref := resolve_image(user_id, iid)) is not None
     ]
+
+    # 本輪有新上傳文件且無新圖 → 視為話題切換到文件，停止沿用上一輪圖片。
+    # 否則 vision_intake 會把舊圖接手、responder 把舊圖附在「請總結此檔案」
+    # 的訊息上 → 回答被舊圖綁架而忽略文件內容。
+    if document_refs and not image_refs and (prev_image_refs or prev_image_understanding):
+        logger.info(
+            "[chat_stream] 本輪有新文件，停止沿用上一輪圖片 conv=%s", conversation_id
+        )
+        prev_image_refs = []
+        prev_image_understanding = None
 
     initial_state = {
         "conversation_id": conversation_id,
@@ -251,6 +315,9 @@ async def chat_stream(
         "image_understanding": None,      # vision_intake 產出
         "prev_image_refs": prev_image_refs,                 # 多輪延續：上一輪圖片（無新圖時沿用）
         "prev_image_understanding": prev_image_understanding,
+        # 文件附件：本輪無新文件時直接沿用前輪（graph 內不需 carryover 邏輯）
+        "document_refs": document_refs or prev_document_refs,
+        "prev_document_refs": prev_document_refs,
     }
 
     # ── 6. SSE 事件生成器 ─────────────────────────────────────

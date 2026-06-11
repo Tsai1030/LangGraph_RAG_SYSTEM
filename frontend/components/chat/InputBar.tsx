@@ -3,21 +3,26 @@
 import { useRef, useState, useEffect } from "react";
 import { ArrowUp, Square, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import DocumentCard from "./DocumentCard";
 import FormPickerButton from "./FormPickerButton";
 import VoiceInputButton, { type VoiceState } from "./VoiceInputButton";
-import type { PendingImage } from "@/types";
+import type { PendingDocument, PendingImage } from "@/types";
 
 interface Props {
-  onSend: (message: string, imageIds?: string[]) => void;
+  onSend: (message: string, imageIds?: string[], documents?: PendingDocument[]) => void;
   onStop: () => void;
   isStreaming: boolean;
   disabled?: boolean;
+  /** 文件上傳需要綁對話（索引存 session_{conversationId}）；未提供時不開放文件上傳 */
+  conversationId?: string;
 }
 
-export default function InputBar({ onSend, onStop, isStreaming, disabled }: Props) {
+export default function InputBar({ onSend, onStop, isStreaming, disabled, conversationId }: Props) {
   const [value, setValue] = useState("");
   const [isMobile, setIsMobile] = useState(false);
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
+  const [pendingDocs, setPendingDocs] = useState<PendingDocument[]>([]);
+  const [docError, setDocError] = useState<string | null>(null);
   // ── 語音輸入（STT）：VoiceInputButton 錄音轉錄，這裡只管 placeholder 與錯誤顯示 ──
   const [recState, setRecState] = useState<VoiceState>("idle");
   const [sttError, setSttError] = useState<string | null>(null);
@@ -52,18 +57,41 @@ export default function InputBar({ onSend, onStop, isStreaming, disabled }: Prop
       return prev.filter((p) => p.image_id !== id);
     });
 
+  // 文件上傳三段式：選檔即顯示 skeleton 卡 → 完成換成正式卡 → 失敗移除並顯示錯誤
+  const startDocument = (doc: PendingDocument) => {
+    setDocError(null);
+    setPendingDocs((prev) => [...prev, doc]);
+  };
+
+  const finishDocument = (tempId: string, doc: PendingDocument) =>
+    setPendingDocs((prev) => prev.map((p) => (p.document_id === tempId ? doc : p)));
+
+  const failDocument = (tempId: string, message: string) => {
+    setPendingDocs((prev) => prev.filter((p) => p.document_id !== tempId));
+    setDocError(message);
+  };
+
+  const removeDocument = (id: string) =>
+    setPendingDocs((prev) => prev.filter((p) => p.document_id !== id));
+
+  const isDocUploading = pendingDocs.some((p) => p.status === "uploading");
+
   const handleSend = () => {
     const msg = value.trim();
-    if ((!msg && pendingImages.length === 0) || isStreaming || disabled) return;
+    if ((!msg && pendingImages.length === 0 && pendingDocs.length === 0) || isStreaming || disabled) return;
+    if (isDocUploading) return; // 文件解析索引中，等完成再送出
     const ids = pendingImages.map((p) => p.image_id);
+    const docs = pendingDocs;
     pendingImages.forEach((p) => URL.revokeObjectURL(p.preview_url));
     setValue("");
     setPendingImages([]);
-    onSend(msg, ids);
+    setPendingDocs([]);
+    onSend(msg, ids, docs);
   };
 
   const canSend =
-    (value.trim().length > 0 || pendingImages.length > 0) &&
+    (value.trim().length > 0 || pendingImages.length > 0 || pendingDocs.length > 0) &&
+    !isDocUploading &&
     !isStreaming &&
     !disabled;
 
@@ -74,6 +102,14 @@ export default function InputBar({ onSend, onStop, isStreaming, disabled }: Prop
           "flex flex-col gap-2 rounded-4xl border bg-white shadow-sm px-3 py-3 transition-all duration-200",
           disabled ? "border-zinc-200 opacity-60" : "border-zinc-200 hover:border-zinc-300 focus-within:border-zinc-400 focus-within:shadow-lg"
         )}>
+          {pendingDocs.length > 0 && (
+            <div className="flex flex-wrap gap-2 px-1 pt-1">
+              {pendingDocs.map((doc) => (
+                <DocumentCard key={doc.document_id} doc={doc} onRemove={removeDocument} />
+              ))}
+            </div>
+          )}
+
           {pendingImages.length > 0 && (
             <div className="flex flex-wrap gap-2 px-1">
               {pendingImages.map((img) => (
@@ -101,6 +137,12 @@ export default function InputBar({ onSend, onStop, isStreaming, disabled }: Prop
             <FormPickerButton
               onSendMessage={(msg) => onSend(msg)}
               onAddImage={addImage}
+              onDocumentUploadStart={startDocument}
+              onDocumentUploadDone={finishDocument}
+              onDocumentUploadError={failDocument}
+              getConversationId={
+                conversationId ? async () => conversationId : undefined
+              }
               disabled={disabled || isStreaming}
             />
             <textarea
@@ -155,6 +197,9 @@ export default function InputBar({ onSend, onStop, isStreaming, disabled }: Prop
 
           {sttError && (
             <p className="px-1 text-[12px] text-rose-500">{sttError}</p>
+          )}
+          {docError && (
+            <p className="px-1 text-[12px] text-rose-500">{docError}</p>
           )}
         </div>
         <p className="text-center text-[11px] text-zinc-400 mt-1.5 select-none">

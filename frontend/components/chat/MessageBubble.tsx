@@ -9,6 +9,7 @@ import { X, Copy, RotateCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { MessageOut, FormFile, Source } from "@/types";
 import SourcesPanel from "./SourcesPanel";
+import DocumentCard from "./DocumentCard";
 import FormFileCard from "./FormFileCard";
 import AuthImage from "./AuthImage";
 
@@ -291,6 +292,7 @@ export default function MessageBubble({
 
   if (isUser) {
     const images = message.meta?.images ?? [];
+    const documents = message.meta?.documents ?? [];
     return (
       <>
         {lightbox && (
@@ -298,6 +300,13 @@ export default function MessageBubble({
         )}
         <div className="flex justify-end px-6 animate-fade-up">
           <div className="max-w-[72%] flex flex-col items-end gap-2">
+            {documents.length > 0 && (
+              <div className="flex flex-wrap gap-2 justify-end">
+                {documents.map((doc) => (
+                  <DocumentCard key={doc.document_id} doc={doc} />
+                ))}
+              </div>
+            )}
             {images.length > 0 && (
               <div className="flex flex-wrap gap-2 justify-end">
                 {images.map((img) => (

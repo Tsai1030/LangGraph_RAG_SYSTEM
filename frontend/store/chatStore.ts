@@ -3,6 +3,7 @@ import type {
   ConversationOut,
   FormFile,
   MessageOut,
+  PendingDocument,
   Source,
 } from "@/types";
 
@@ -33,6 +34,8 @@ interface ChatState {
   setPendingMessage: (msg: string | null) => void;
   pendingImageIds: string[];
   setPendingImageIds: (ids: string[]) => void;
+  pendingDocuments: PendingDocument[];
+  setPendingDocuments: (docs: PendingDocument[]) => void;
 
   streamingByConversation: Record<string, ConversationStreamingState>;
   startStreaming: (conversationId: string, message: MessageOut) => void;
@@ -83,6 +86,8 @@ export const useChatStore = create<ChatState>((set) => ({
   setPendingMessage: (msg) => set({ pendingMessage: msg }),
   pendingImageIds: [],
   setPendingImageIds: (ids) => set({ pendingImageIds: ids }),
+  pendingDocuments: [],
+  setPendingDocuments: (docs) => set({ pendingDocuments: docs }),
 
   streamingByConversation: {},
   startStreaming: (conversationId, message) =>

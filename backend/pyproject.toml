@@ -45,6 +45,8 @@ dependencies = [
     "google-auth>=2.35",
     "langchain-google-genai>=2.1",
     "psycopg[binary]>=3.3.4",
+    # 聊天文件上傳（PDF/DOCX/PPTX → Markdown → 對話專屬向量索引）
+    "markitdown[pdf,docx,pptx]>=0.1",
 ]
 
 [tool.pytest.ini_options]

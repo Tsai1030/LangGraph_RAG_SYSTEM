@@ -43,6 +43,17 @@ def sniff_image_mime(data: bytes) -> str | None:
     return None
 
 
+def sniff_document_kind(data: bytes) -> str | None:
+    """以 magic bytes 判斷文件容器類型：'pdf'（%PDF-）/ 'zip'（docx/pptx 皆為
+    OOXML zip）/ None。zip 內容是 docx 還是 pptx 交由 markitdown 解析時確認
+    （宣告與內容不符會解析失敗）。"""
+    if data.startswith(b"%PDF-"):
+        return "pdf"
+    if data.startswith(b"PK\x03\x04"):
+        return "zip"
+    return None
+
+
 def sniff_audio_ok(data: bytes, mime: str) -> bool:
     """輕量檢查音訊檔頭是否像合法 container。
 
