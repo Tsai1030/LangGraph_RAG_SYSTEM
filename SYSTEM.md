@@ -39,14 +39,14 @@ flowchart TD
     GRAPH --> LLM["LLM Providers<br/>OpenAI gpt-5.4 系列<br/>Gemini 3.5 Flash (VLM)"]
     GRAPH --> CKPT[("PostgreSQL<br/>LangGraph checkpointer<br/>(thread_id = conversation_id)")]
 
-    BE --> APPDB[("app.db (SQLite)<br/>users / conversations /<br/>messages / summaries")]
+    BE --> APPDB[("PostgreSQL kb_app<br/>users / conversations /<br/>messages / summaries")]
     BE --> DISK["磁碟<br/>uploads/{user_id}/<br/>generated_forms/"]
 ```
 
 核心理念:
 
 - **Graph 只負責「一輪對話」的推理流程**;持久化(訊息、摘要、表單 session)由
-  checkpointer 與 app.db 分工。
+  checkpointer 與 PostgreSQL(`kb_app`)分工。
 - **知識庫寫入完全離線**(scripts pipeline),線上 graph 對 KB 只讀。唯一的線上寫入
   是聊天文件上傳的「對話專屬 session 索引」。
 - **重資料不進 state**:圖片 base64、文件全文都不進 checkpoint;state 只放輕量參照
@@ -58,8 +58,8 @@ flowchart TD
 
 | 儲存 | 內容 | 寫入時機 |
 |---|---|---|
-| `app.db`(SQLite) | users / conversations / messages / conversation_summaries | API 層(save_message 等) |
-| PostgreSQL(或 SQLite fallback) | LangGraph checkpoint(每輪 graph state 快照,thread_id = conversation_id) | graph 執行後自動 |
+| PostgreSQL `kb_app` | users / conversations / messages / conversation_summaries | API 層(save_message 等) |
+| PostgreSQL `kb_langgraph` | LangGraph checkpoint(每輪 graph state 快照,thread_id = conversation_id) | graph 執行後自動 |
 | ChromaDB `construction_knowledge` | 知識庫 chunks(51 份營造規範 Markdown) | 離線 ingestion |
 | ChromaDB `session_{conversation_id}` | 聊天上傳文件的 chunks(對話專屬) | 上傳當下 |
 | `uploads/{user_id}/` | 上傳的圖片與文件原檔(uuid 命名 + `.name` sidecar 存原始檔名) | 上傳當下 |
@@ -327,7 +327,7 @@ classDiagram
 | 識別 | `conversation_id` / `user_id` | thread_id = conversation_id,checkpointer 以此分隔 |
 | 訊息 | `messages` | `add_messages` reducer:append 自動合併、RemoveMessage 可刪 |
 | | `query` | 本輪問題;vision_intake 可能把圖片解析併入(原始問題仍在 messages) |
-| | `summary` | 壓縮摘要(同步存 app.db,重啟可恢復) |
+| | `summary` | 壓縮摘要(同步存 PostgreSQL `kb_app`,重啟可恢復) |
 | RAG | `retrieved_chunks` | `[{id, document, metadata, distance}]` |
 | | `context` | context_builder 組好的字串 |
 | | `sources` | 前端來源面板資料(source_filter 會覆寫為過濾後版本) |
@@ -483,7 +483,7 @@ flowchart TD
   **> 8000** 設 `is_compact_needed`。
 - `summarizer`:保留最近 **8 則**(4 輪),其餘交 LLM 摘要;
   用 `RemoveMessage`(add_messages reducer 支援)從 state 刪舊訊息;
-  摘要同步 upsert 到 app.db 的 `conversation_summaries`(重啟後 chat_stream
+  摘要同步 upsert 到 PostgreSQL(`kb_app`)的 `conversation_summaries`(重啟後 chat_stream
   會從 DB 載回注入 state)。
 - responder 的 system prompt 含 `[前情摘要]` 區塊,摘要 + 最近 8 則 = 完整上下文。
 

@@ -50,7 +50,7 @@
 
 6 步驟 wizard:設定會議日期 → 抓盤價(豐興 / 國際廢鋼 / 西本 / LME,LangGraph
 平行爬取 90–180s)→ 預覽 → 中鋼 seed 調整 → 補內部資料 → 產出週會 Word。
-獨立 `search.db`、獨立權限(`search_enabled`)、模組邊界禁止跨 import RAG 內部。
+獨立 PostgreSQL database(`kb_search`)、獨立權限(`search_enabled`)、模組邊界禁止跨 import RAG 內部。
 
 ---
 
@@ -76,11 +76,11 @@
               ├─ /api/admin/*               admin 後台
               └─ /api/search/*              SEARCH 模組
               │
-              ├─ app.db                     users / conversations / messages / summaries
-              ├─ PostgreSQL                 LangGraph checkpointer(thread_id = conversation_id)
+              ├─ PostgreSQL kb_app          users / conversations / messages / summaries
+              ├─ PostgreSQL kb_langgraph    LangGraph checkpointer(thread_id = conversation_id)
               ├─ chroma_db / chroma_versions  知識庫向量 + session_{conv_id} 文件索引
               ├─ uploads/{user_id}/         上傳圖片與文件原檔
-              └─ search.db                  SEARCH 模組獨立 DB
+              └─ PostgreSQL kb_search       SEARCH 模組獨立 DB
 ```
 
 兩個模組共用同一個 FastAPI 進程、同一個 Next.js bundle、同一份 `.env`。
@@ -211,8 +211,8 @@ LangGraph_RAG_SYSTEM/
 | 關鍵字檢索 | rank-bm25 + jieba(4,948 詞營造領域詞典) |
 | 文件解析 | markitdown(PDF/DOCX/PPTX → Markdown) |
 | 文件產出 | python-docx / openpyxl |
-| Checkpointer | langgraph-checkpoint-postgres(SQLite fallback) |
-| ORM | SQLAlchemy 2(async)+ aiosqlite + Alembic |
+| Checkpointer | langgraph-checkpoint-postgres |
+| ORM | SQLAlchemy 2(async)+ asyncpg + Alembic |
 | 認證 | python-jose JWT + bcrypt;slowapi rate limit |
 | 觀測 | LangSmith tracing |
 
@@ -280,17 +280,14 @@ curl https://<host>/api/health
 
 ## 維運與已知地雷
 
-### 🔴 SQLite cascade-delete via `batch_alter_table`
+### 🟢 SQLite → PostgreSQL(已於 2026-05-20 完成遷移)
 
-歷史事故:alembic 用 `batch_alter_table` 在 SQLite ADD COLUMN,其「CREATE 新表 +
-DROP 舊表」觸發 ON DELETE CASCADE 砍掉整條 conversations 鏈。
-**SOP**:schema migration 前必備份 `app.db`;動到 `users` / `conversations` 的
-migration 用 `op.add_column` / raw SQL,**不要用** `batch_alter_table`。
-
-### 🔴 SQLite WAL/SHM 殘留
-
-從備份還原 `app.db` 後,舊的 `-wal` / `-shm` 會讓新連線看到舊 schema。
-還原後必刪:`Remove-Item app.db-wal, app.db-shm -Force`
+歷史包袱:早期用 3 個 SQLite 檔(`app.db` / `search.db` / `langgraph.db`),在
+PM2 + Windows 環境下孤兒 process 持有舊 file handle,導致「重啟後 API 看到
+舊版資料」、`batch_alter_table` cascade-delete、WAL/SHM 殘留等一連串問題。
+已全數遷移到 PostgreSQL(同一個 PG server,`kb_app` / `kb_search` /
+`kb_langgraph` 三個 database),此類問題已從架構面根除。遷移細節與踩雷紀錄見
+[db.md](db.md)。
 
 ### 🟡 SSE 直連 backend
 
