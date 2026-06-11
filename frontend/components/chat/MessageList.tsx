@@ -20,6 +20,7 @@ interface Props {
   streamingSources: Source[];
   isFormLoading?: boolean;
   isImageReading?: boolean;
+  currentStep?: string | null;
   onSuggestedQuery: (q: string) => void;
   loading?: boolean;
   onAtBottomChange?: (atBottom: boolean) => void;
@@ -72,7 +73,7 @@ function LoadingSkeleton() {
 
 export default function MessageList({
   messages, streamingMessage, streamingFormFiles,
-  streamingSources, isFormLoading = false, isImageReading = false, onSuggestedQuery, loading = false,
+  streamingSources, isFormLoading = false, isImageReading = false, currentStep, onSuggestedQuery, loading = false,
   onAtBottomChange, scrollToBottomRef, onRetry, retryDisabled = false,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -147,6 +148,7 @@ export default function MessageList({
                 isStreaming
                 isFormLoading={isFormLoading}
                 isImageReading={isImageReading}
+                currentStep={currentStep}
                 streamingFormFiles={streamingFormFiles}
                 streamingSources={streamingSources}
               />

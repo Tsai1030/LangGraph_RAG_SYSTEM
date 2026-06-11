@@ -466,3 +466,22 @@ async def get_vector_info():
         resolved_path=resolved,
         collections=collections,
     )
+
+
+@router.post("/vector/refresh-bm25")
+async def refresh_bm25():
+    """重建 BM25 索引（KB 離線更新後免重啟 hybrid 檢索就吃到新文件）。
+
+    注意：讀的是「當前已開啟」的 Chroma collection；換 CHROMA_ACTIVE_VERSION
+    仍需重啟（vector_store client 是 process 級快取）。router 層已掛
+    get_current_admin，僅 admin 可呼叫。
+    """
+    import time as _time
+
+    from app.rag.retriever import rebuild_bm25
+
+    t0 = _time.perf_counter()
+    count = await rebuild_bm25()
+    elapsed_ms = int((_time.perf_counter() - t0) * 1000)
+    logger.info("[vector] BM25 rebuilt: %d docs in %d ms", count, elapsed_ms)
+    return {"document_count": count, "elapsed_ms": elapsed_ms}

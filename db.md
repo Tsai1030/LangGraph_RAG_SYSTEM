@@ -277,7 +277,7 @@ def set_sqlite_pragmas(dbapi_conn, _):
 >   1. `pm2 stop frontend` + `pm2 stop backend`
 >   2. 在 :3000 起一個 Python HTTP server 服務 `maintenance.html`（任何 URL 都回 HTTP 503 + 維護中頁面）
 >
-> 使用者在 `https://kccc3798.tail138ec9.ts.net/` 會看到友善的「系統維護中」頁面而不是 502 錯誤。
+> 使用者在 `https://kccw0077.tail138ec9.ts.net:8443/` 會看到友善的「系統維護中」頁面而不是 502 錯誤。
 >
 > Phase 4 切換完成後，**關掉 `Maintenance Server` 視窗（Ctrl+C）→ 跑 `exit-maintenance.bat`** 就會恢復正常服務。
 
@@ -392,7 +392,7 @@ pm2 logs backend --lines 30 --nostream
 curl http://127.0.0.1:8000/api/health
 curl http://127.0.0.1:8000/api/admin/stats -H "Authorization: Bearer <token>"
 ```
-打開瀏覽器 `https://kccc3798.tail138ec9.ts.net/`，登入、看一筆對話、發新訊息。
+打開瀏覽器 `https://kccw0077.tail138ec9.ts.net:8443/`，登入、看一筆對話、發新訊息。
 
 ---
 

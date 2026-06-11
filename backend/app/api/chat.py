@@ -16,14 +16,16 @@ from __future__ import annotations # python 未來性設定，型別註記處理
 
 import asyncio
 import json # 把dict轉成json因為sse stream
+import logging
 from typing import AsyncGenerator
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse, StreamingResponse
 from langchain_core.messages import HumanMessage # 建立langchain/langraph用的使用者訊息格式
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_current_user
+from app.core.rate_limit import limiter, user_or_ip_key
 from app.database import AsyncSessionLocal, get_db
 from app.models.user import User
 from app.schemas.chat import ChatRequest
@@ -32,15 +34,40 @@ from app.services.conversation_service import (
     get_summary,
     save_message,
 )
+from app.services.audio_transcribe import MAX_AUDIO_BYTES, transcribe_audio
+from app.services.document_store import resolve_document, save_document_upload
 from app.services.image_store import resolve_image, save_upload
+from app.services.upload_guard import read_limited, sniff_audio_ok
+
+logger = logging.getLogger("app.chat")
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
 _chat_semaphore = asyncio.Semaphore(20)
 
+NODE_STEP_LABELS: dict[str, str] = {
+    "vision_intake":        "Analyzing image…",
+    "compact_check":        "Checking context…",
+    "summarizer":           "Compressing history…",
+    "unified_intent":       "Understanding intent…",
+    "retriever":            "Searching knowledge base…",
+    "context_builder":      "Building context…",
+    "retrieval_grader":     "Evaluating relevance…",
+    "query_rewriter":       "Refining search query…",
+    "form_structurer":      "Structuring form…",
+    "form_template_loader": "Loading form template…",
+    "form_fill_collector":  "Collecting form fields…",
+    "form_filler":          "Filling form…",
+    "form_exporter":        "Exporting form…",
+    "responder":            "Generating response…",
+    "source_filter":        "Filtering sources…",
+}
+
 
 @router.post("/upload")
+@limiter.limit("30/minute", key_func=user_or_ip_key)
 async def chat_upload(
+    request: Request,
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
 ):
@@ -57,6 +84,76 @@ async def chat_upload(
         )
 
 
+@router.post("/upload-document")
+@limiter.limit("10/minute", key_func=user_or_ip_key)
+async def chat_upload_document(
+    request: Request,
+    file: UploadFile = File(...),
+    conversation_id: str = Form(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """POST /api/chat/upload-document — 上傳 PDF/DOCX/PPTX，回
+    {document_id, filename, chunk_count}。
+
+    文件在此 endpoint 內完成 markitdown 解析 + chunk + embed 進對話專屬
+    向量索引（session_{conversation_id}），回傳即代表可檢索。送訊息時把
+    document_id 放進 ChatRequest.document_ids。
+    """
+    from app.services.conversation_service import get_conversation
+    try:
+        await get_conversation(db, conversation_id, str(current_user.id))
+    except HTTPException:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found",
+        )
+    try:
+        return await save_document_upload(
+            str(current_user.id), conversation_id, file
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+        )
+
+
+@router.post("/transcribe")
+@limiter.limit("15/minute", key_func=user_or_ip_key)
+async def chat_transcribe(
+    request: Request,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
+    """POST /api/chat/transcribe — 語音輸入（STT），回 {text}。
+
+    方案 A：轉錄在進 graph 之前完成，graph / state 零改動。前端錄音上傳，
+    這裡用 AUDIO_MODEL（Gemini 多模態）轉文字，前端填回輸入框讓使用者
+    確認後再送出。音訊不落磁碟、不進 checkpoint。
+    """
+    try:
+        data = await read_limited(file, MAX_AUDIO_BYTES)
+        mime = file.content_type or ""
+        if not sniff_audio_ok(data, mime):
+            # 檔頭不像合法音訊 container：只記警告不擋（codec 變異多，誤殺成本高）
+            logger.warning(
+                "[transcribe] 音訊檔頭與宣告 mime=%s 不符（%d bytes），仍嘗試轉錄",
+                mime, len(data),
+            )
+        text = await transcribe_audio(data, mime)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+        )
+    except Exception:
+        # STT 失敗不應曝露內部錯誤細節；前端顯示通用訊息即可
+        logger.exception("[transcribe] STT 轉錄失敗")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail="語音轉錄失敗，請重試"
+        )
+    return {"text": text}
+
+
 @router.get("/image/{image_id}")
 async def chat_image(
     image_id: str,
@@ -70,6 +167,7 @@ async def chat_image(
 
 
 @router.post("/stream")
+@limiter.limit("20/minute", key_func=user_or_ip_key)
 async def chat_stream(
     request: Request,
     body: ChatRequest,
@@ -107,12 +205,23 @@ async def chat_stream(
         )
     await _chat_semaphore.acquire()
 
-    # ── 2. 儲存使用者訊息（含本輪上傳圖片，供泡泡縮圖；重整後仍可顯示）──
-    user_meta = (
-        {"images": [{"image_id": iid} for iid in body.image_ids]}
-        if body.image_ids else None
+    # ── 2. 儲存使用者訊息（含本輪上傳圖片/文件，供泡泡顯示；重整後仍可顯示）──
+    # 文件附件先 resolve（同時取得原始檔名供泡泡 chip 顯示）
+    document_refs = [
+        ref for did in body.document_ids
+        if (ref := resolve_document(user_id, did)) is not None
+    ]
+    user_meta: dict = {}
+    if body.image_ids:
+        user_meta["images"] = [{"image_id": iid} for iid in body.image_ids]
+    if document_refs:
+        user_meta["documents"] = [
+            {"document_id": r["id"], "filename": r["filename"], "size": r.get("size")}
+            for r in document_refs
+        ]
+    await save_message(
+        db, conversation_id, "user", body.message, metadata=user_meta or None
     )
-    await save_message(db, conversation_id, "user", body.message, metadata=user_meta)
 
     # ── 3. 自動設定對話標題（首次訊息） ──────────────────────
     await auto_set_title(db, conversation_id, body.message)
@@ -130,6 +239,7 @@ async def chat_stream(
     prev_form_data = None
     prev_image_refs: list = []
     prev_image_understanding = None
+    prev_document_refs: list = []
     try:
         prev_state = await graph.aget_state(config)
         if prev_state and prev_state.values:
@@ -147,14 +257,35 @@ async def chat_stream(
                 prev_state.values.get("image_understanding")
                 or prev_state.values.get("prev_image_understanding")
             )
+            # 多輪文件延續：本輪無新文件時沿用（session 索引本就持久，refs 供
+            # intent 提示與 retriever 觸發雙索引查詢）
+            prev_document_refs = (
+                prev_state.values.get("document_refs")
+                or prev_state.values.get("prev_document_refs")
+                or []
+            )
     except Exception:
-        pass
+        # 非致命：拿不到前輪 state 就少了多輪延續，但本輪對話照常進行
+        logger.warning(
+            "[chat_stream] 讀取前輪 state 失敗 conv=%s（多輪表單/圖片延續本輪失效）",
+            conversation_id, exc_info=True,
+        )
 
     # ── 解析本輪上傳圖片（VLM）→ 只放輕量參照，base64 不進 state ──
     image_refs = [
         ref for iid in body.image_ids
         if (ref := resolve_image(user_id, iid)) is not None
     ]
+
+    # 本輪有新上傳文件且無新圖 → 視為話題切換到文件，停止沿用上一輪圖片。
+    # 否則 vision_intake 會把舊圖接手、responder 把舊圖附在「請總結此檔案」
+    # 的訊息上 → 回答被舊圖綁架而忽略文件內容。
+    if document_refs and not image_refs and (prev_image_refs or prev_image_understanding):
+        logger.info(
+            "[chat_stream] 本輪有新文件，停止沿用上一輪圖片 conv=%s", conversation_id
+        )
+        prev_image_refs = []
+        prev_image_understanding = None
 
     initial_state = {
         "conversation_id": conversation_id,
@@ -184,6 +315,9 @@ async def chat_stream(
         "image_understanding": None,      # vision_intake 產出
         "prev_image_refs": prev_image_refs,                 # 多輪延續：上一輪圖片（無新圖時沿用）
         "prev_image_understanding": prev_image_understanding,
+        # 文件附件：本輪無新文件時直接沿用前輪（graph 內不需 carryover 邏輯）
+        "document_refs": document_refs or prev_document_refs,
+        "prev_document_refs": prev_document_refs,
     }
 
     # ── 6. SSE 事件生成器 ─────────────────────────────────────
@@ -204,6 +338,12 @@ async def chat_stream(
                     event_type = event.get("event", "")
                     event_name = event.get("name", "")
                     node_name = event.get("metadata", {}).get("langgraph_node", "")
+
+                    # 每個 graph node 開始 → 推送 step 事件讓前端顯示進度
+                    if event_type == "on_chain_start" and event_name in NODE_STEP_LABELS:
+                        yield (
+                            f"data: {json.dumps({'type': 'step', 'node': event_name, 'label': NODE_STEP_LABELS[event_name]})}\n\n"
+                        )
 
                     # form_structurer 開始 → 推送 form_loading 讓前端顯示「Generating table…」
                     if event_type == "on_chain_start" and event_name == "form_structurer":
@@ -241,8 +381,7 @@ async def chat_stream(
             except Exception as exc:
                 had_error = True
                 # 細節記 log；前端只給通用英文錯誤訊息（避免內部訊息洩漏）
-                import logging
-                logging.getLogger("app.chat").exception(
+                logger.exception(
                     "[chat_stream] graph error in conv=%s: %s",
                     conversation_id, exc,
                 )
@@ -256,7 +395,11 @@ async def chat_stream(
                     final = await graph.aget_state(config)
                     final_values = final.values if final else {}
                 except Exception:
-                    pass  # 讀取失敗保留空 dict，不影響已串流文字
+                    # 讀取失敗保留空 dict，不影響已串流文字（但 sources/form 事件會缺漏）
+                    logger.warning(
+                        "[chat_stream] 讀取最終 state 失敗 conv=%s（sources/form 事件略過）",
+                        conversation_id, exc_info=True,
+                    )
 
                 sources = final_values.get("sources", [])
                 if sources:
@@ -330,7 +473,11 @@ async def chat_stream(
                             output_tokens=total_output_tokens or None,
                         )
                 except Exception:
-                    pass  # 儲存失敗不影響已完成的串流
+                    # 儲存失敗不影響已完成的串流，但對話紀錄會缺這則回覆 — 必須記 log
+                    logger.exception(
+                        "[chat_stream] 儲存 AI 回覆失敗 conv=%s（%d 字未入庫）",
+                        conversation_id, len(assistant_response),
+                    )
 
         finally:
             _chat_semaphore.release()

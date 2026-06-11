@@ -10,6 +10,7 @@
 |---|---|
 | Loading 結束後**整段一次性蹦出**（逐字效果消失） | ★ 99% 是路由 / proxy buffer 問題 |
 | 完全沒回應、卡在 Thinking | backend 沒起、token 過期、Tailscale Funnel 沒開 |
+| **外網開不了 / 瀏覽器憑證警告頁（`ERR_TLS_CERT_ALTNAME_INVALID`）** | Funnel 跑在 443，被本機 IIS/SSTP VPN 搶走、回公司憑證 → 改用 **8443**（見 Step 1 說明、跑 reset 腳本） |
 | `Something went wrong. Please try again later.` | backend 起來但路由錯（看後端 log 確認 path） |
 
 下面 SOP 主要解決第一種（最常見）。
@@ -22,13 +23,15 @@
 tailscale serve status
 ```
 
-**預期**（兩條規則都要在）：
+**預期**（兩條規則都要在，且 port 是 **8443**）：
 
 ```
-https://kccc3798.tail138ec9.ts.net (Funnel on)
+https://kccw0077.tail138ec9.ts.net:8443 (Funnel on)
 |-- /    proxy http://127.0.0.1:3000
 |-- /api proxy http://localhost:8000/api
 ```
+
+> **為什麼是 8443 不是 443**：本機（kccw0077）的 IIS + SSTP VPN 已經佔住作業系統的 443，並送公司憑證 `*.bes.com.tw`。Funnel 若用 443 會搶輸，外網訪客拿到錯憑證（`ERR_TLS_CERT_ALTNAME_INVALID`）連不進來。改用空閒的 8443，tailscaled 才能送正確的 kccw0077 憑證。所以對外網址帶 `:8443` 尾巴。
 
 **不對的情況對照表**：
 
@@ -129,7 +132,7 @@ pm2 logs frontend --lines 50 --nostream
 
 3. **`.env.local` 的 `NEXT_PUBLIC_BACKEND_URL`** 要指 Funnel URL（不是 `localhost:8000`）：
    ```
-   NEXT_PUBLIC_BACKEND_URL=https://kccc3798.tail138ec9.ts.net
+   NEXT_PUBLIC_BACKEND_URL=https://kccw0077.tail138ec9.ts.net:8443
    ```
    因為這個變數是 build-time 烤進瀏覽器 bundle 的，外網員工的瀏覽器無法解析 `localhost`。
 

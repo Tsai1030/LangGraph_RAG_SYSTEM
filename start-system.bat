@@ -15,7 +15,7 @@ REM    PM2-spawned python and double-clicked start-backend.bat.
 REM    Only an interactive IDE terminal launch survives COMODO's
 REM    parent-chain check. So you must run it yourself:
 REM
-REM        cd C:\Users\226376\Desktop\data\backend
+REM        cd /d C:\Users\226376\Desktop\LangGraph_RAG_SYSTEM\backend
 REM        uv run python run_server.py
 REM
 REM    The IDE terminal that runs that command MUST stay open.
@@ -32,7 +32,9 @@ if %errorLevel% NEQ 0 (
 cd /d "%~dp0"
 
 REM UAC-elevated session may not inherit User PATH.
-SET "PATH=%PATH%;%APPDATA%\npm;C:\Program Files\nodejs"
+SET "PATH=%PATH%;%APPDATA%\npm;C:\Program Files\nodejs;C:\Program Files\Tailscale"
+SET "TAILSCALE_EXE=%ProgramFiles%\Tailscale\tailscale.exe"
+IF NOT EXIST "%TAILSCALE_EXE%" SET "TAILSCALE_EXE=tailscale"
 
 cls
 echo ============================================
@@ -65,11 +67,14 @@ REM ========================================================
 REM  2/3 - Tailscale Funnel routing
 REM         /    -> 3000 (Next.js)
 REM         /api -> 8000/api (FastAPI direct -- SSE-safe, bypasses Next.js buffer)
+REM  NOTE: port 8443, not 443 -- this machine's IIS/SSTP VPN own OS :443 and
+REM        serve the corporate *.bes.com.tw cert, so Funnel on 443 loses and
+REM        external visitors get a cert-name mismatch. 8443 is free.
 REM ========================================================
 echo [2/3] Configuring Tailscale Funnel...
-tailscale serve reset >nul 2>&1
-tailscale funnel --bg http://localhost:3000
-tailscale funnel --bg --set-path=/api http://localhost:8000/api
+"%TAILSCALE_EXE%" serve reset >nul 2>&1
+"%TAILSCALE_EXE%" funnel --bg --https=8443 http://localhost:3000
+"%TAILSCALE_EXE%" funnel --bg --https=8443 --set-path=/api http://localhost:8000/api
 if %errorLevel% NEQ 0 (
     echo [WARN] Tailscale funnel command failed. Run reset-tailscale-routing.ps1 manually.
 )
@@ -83,7 +88,7 @@ powershell -NoProfile -Command "$d=(Get-Date).AddSeconds(60); $ok=$false; while 
 
 echo.
 echo Checking backend :8000...
-powershell -NoProfile -Command "if (Get-NetTCPConnection -State Listen -LocalPort 8000 -ErrorAction SilentlyContinue) { Write-Host '  Backend  :8000 LISTENING (good)' -ForegroundColor Green } else { Write-Host '  Backend  :8000 NOT listening -- start it manually in your IDE terminal:' -ForegroundColor Yellow; Write-Host '      cd C:\Users\226376\Desktop\data\backend' -ForegroundColor Yellow; Write-Host '      uv run python run_server.py' -ForegroundColor Yellow }"
+powershell -NoProfile -Command "if (Get-NetTCPConnection -State Listen -LocalPort 8000 -ErrorAction SilentlyContinue) { Write-Host '  Backend  :8000 LISTENING (good)' -ForegroundColor Green } else { Write-Host '  Backend  :8000 NOT listening -- start it manually in your IDE terminal:' -ForegroundColor Yellow; Write-Host '      cd /d %~dp0backend' -ForegroundColor Yellow; Write-Host '      uv run python run_server.py' -ForegroundColor Yellow }"
 echo.
 
 REM ========================================================
@@ -99,16 +104,16 @@ call pm2 list
 echo.
 
 echo --- Tailscale Funnel ---
-tailscale serve status
+"%TAILSCALE_EXE%" serve status
 echo.
 
 echo ============================================
-echo   Public URL: https://kccc3798.tail138ec9.ts.net
+echo   Public URL: https://kccw0077.tail138ec9.ts.net:8443
 echo ============================================
 echo.
 echo REMINDER:
 echo   If backend :8000 is NOT listening above, open your IDE terminal:
-echo       cd %~dp0backend
+echo       cd /d "%~dp0backend"
 echo       uv run python run_server.py
 echo   Keep that terminal open -- closing it stops backend.
 echo.

@@ -8,6 +8,8 @@ compact.py — Token 計算與對話壓縮節點
 
 from __future__ import annotations
 
+import logging
+
 import tiktoken
 from langchain_core.messages import (
     AIMessage,
@@ -19,6 +21,8 @@ from app.config import settings
 from app.core.llm import get_llm
 from app.graph.state import GraphState
 from app.prompts import get_prompt
+
+logger = logging.getLogger("app.compact")
 
 # compact 觸發閾值（tokens）
 COMPACT_THRESHOLD = 8000
@@ -122,7 +126,10 @@ async def summarizer(state: GraphState) -> dict:
                     summarized_message_count=len(old_messages),
                 )
         except Exception:
-            pass
+            # 非致命：摘要仍在 state 內供本輪使用，但重啟後 DB 撈不到舊摘要
+            logger.warning(
+                "[summarizer] 摘要寫入 DB 失敗 conv=%s", conversation_id, exc_info=True,
+            )
 
     return {
         "messages": remove_ops,        # add_messages reducer 處理刪除

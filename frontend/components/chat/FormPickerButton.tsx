@@ -5,6 +5,7 @@ import {
   Plus,
   Files,
   ImagePlus,
+  Paperclip,
   Download,
   Sparkles,
   ArrowLeft,
@@ -14,13 +15,21 @@ import {
 import api from "@/lib/api";
 import { getAccessToken } from "@/store/authStore";
 import { cn } from "@/lib/utils";
-import type { FormFile, PendingImage } from "@/types";
+import type { FormFile, PendingDocument, PendingImage } from "@/types";
 
 interface Props {
   /** 點擊「AI 代填」時送出對話訊息。會把 popover 關掉並送出固定字串。 */
   onSendMessage: (message: string) => void;
   /** 上傳圖片成功後回傳給 InputBar 暫存（送出時帶 image_id）。未提供時不顯示「上傳圖片」、直接開到表單清單。 */
   onAddImage?: (img: PendingImage) => void;
+  /** 文件上傳（PDF/DOCX/PPTX）三段式回呼：選檔當下先以暫時 id 顯示載入卡，
+   *  完成後以後端 document_id 取代，失敗則移除卡片並顯示錯誤。
+   *  文件索引綁對話，需同時提供 getConversationId 才顯示「上傳文件」。
+   *  /new 頁可在 getConversationId 內先建立對話再回傳 id（lazy create）。 */
+  onDocumentUploadStart?: (doc: PendingDocument) => void;
+  onDocumentUploadDone?: (tempId: string, doc: PendingDocument) => void;
+  onDocumentUploadError?: (tempId: string, message: string) => void;
+  getConversationId?: () => Promise<string>;
   disabled?: boolean;
 }
 
@@ -32,7 +41,15 @@ interface Props {
  *   - 上傳圖片 → 開檔案選擇器，上傳到 /api/chat/upload，回傳 image_id 給 InputBar
  * 點外面 / Esc 關閉。
  */
-export default function FormPickerButton({ onSendMessage, onAddImage, disabled }: Props) {
+export default function FormPickerButton({
+  onSendMessage,
+  onAddImage,
+  onDocumentUploadStart,
+  onDocumentUploadDone,
+  onDocumentUploadError,
+  getConversationId,
+  disabled,
+}: Props) {
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<"root" | "forms">("root");
   const [forms, setForms] = useState<FormFile[]>([]);
@@ -47,6 +64,9 @@ export default function FormPickerButton({ onSendMessage, onAddImage, disabled }
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const docInputRef = useRef<HTMLInputElement>(null);
+
+  const canUploadDocument = Boolean(onDocumentUploadStart && getConversationId);
 
   // ── 進入表單清單時載入清單，之後快取不重抓 ─────────────
   useEffect(() => {
@@ -141,6 +161,63 @@ export default function FormPickerButton({ onSendMessage, onAddImage, disabled }
     closeAll();
   };
 
+  // ── 上傳文件 → /api/chat/upload-document（後端同步解析+索引，較耗時）──
+  // 選檔當下即關閉 popover、在 InputBar 顯示 skeleton 載入卡；完成/失敗再回報
+  const handleDocChange = async (e: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = "";
+    if (!files.length || !getConversationId) return;
+
+    const entries = files.map((file) => ({
+      file,
+      tempId: `tmp-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    }));
+    entries.forEach(({ file, tempId }) =>
+      onDocumentUploadStart?.({
+        document_id: tempId,
+        filename: file.name,
+        size: file.size,
+        status: "uploading",
+      })
+    );
+    closeAll();
+
+    let conversationId: string;
+    try {
+      // /new 頁此 callback 會先建立對話再回傳 id（索引必須綁對話）
+      conversationId = await getConversationId();
+    } catch {
+      entries.forEach(({ tempId }) =>
+        onDocumentUploadError?.(tempId, "建立對話失敗，請稍後再試")
+      );
+      return;
+    }
+
+    for (const { file, tempId } of entries) {
+      try {
+        const fd = new FormData();
+        fd.append("file", file);
+        fd.append("conversation_id", conversationId);
+        const { data } = await api.post<{
+          document_id: string;
+          filename: string;
+          chunk_count: number;
+        }>("/chat/upload-document", fd);
+        onDocumentUploadDone?.(tempId, {
+          document_id: data.document_id,
+          filename: data.filename,
+          size: file.size,
+          status: "ready",
+        });
+      } catch (err: unknown) {
+        // 後端 400 帶有明確訊息（格式不符 / 掃描檔無文字等），直接顯示
+        const detail =
+          (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+        onDocumentUploadError?.(tempId, detail ?? "上傳失敗，請稍後再試");
+      }
+    }
+  };
+
   // ── 上傳圖片 → /api/chat/upload，回傳 image_id 給 InputBar ──
   const handleFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
@@ -199,6 +276,14 @@ export default function FormPickerButton({ onSendMessage, onAddImage, disabled }
         multiple
         hidden
         onChange={handleFileChange}
+      />
+
+      <input
+        ref={docInputRef}
+        type="file"
+        accept=".pdf,.docx,.pptx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        hidden
+        onChange={handleDocChange}
       />
 
       {open && (
@@ -290,6 +375,16 @@ export default function FormPickerButton({ onSendMessage, onAddImage, disabled }
                   <ImagePlus size={15} className="shrink-0 text-zinc-500" />
                   <span className="flex-1">{uploading ? "上傳中…" : "上傳圖片"}</span>
                 </button>
+                {canUploadDocument && (
+                  <button
+                    type="button"
+                    onClick={() => docInputRef.current?.click()}
+                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left text-[14px] text-zinc-800 hover:bg-zinc-100 transition-colors"
+                  >
+                    <Paperclip size={15} className="shrink-0 text-zinc-500" />
+                    <span className="flex-1">上傳文件（PDF/Word/PPT）</span>
+                  </button>
+                )}
                 {uploadError && (
                   <p className="px-3 pt-1 text-[12px] text-rose-500">{uploadError}</p>
                 )}

@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>營造業知識庫 RAG 系統 — Technical Report</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --h: 195;
+  --fs: 15.5px;
+  --bg: oklch(16.5% 0.013 var(--h));
+  --bg-2: oklch(19% 0.015 var(--h));
+  --panel: oklch(21% 0.016 var(--h));
+  --panel-2: oklch(24.5% 0.018 var(--h));
+  --line: oklch(31% 0.018 var(--h));
+  --line-soft: oklch(26% 0.016 var(--h));
+  --text: oklch(88% 0.008 var(--h));
+  --muted: oklch(64% 0.014 var(--h));
+  --faint: oklch(47% 0.014 var(--h));
+  --accent: oklch(80% 0.135 var(--h));
+  --accent-dim: oklch(32% 0.06 var(--h));
+  --accent-ghost: oklch(23% 0.035 var(--h));
+  --kw: oklch(74% 0.12 300);   /* 關鍵字 紫 */
+  --str: oklch(76% 0.13 150);  /* 字串 綠 */
+  --num: oklch(79% 0.12 75);   /* 數值 琥珀 */
+  --mono: "JetBrains Mono", ui-monospace, monospace;
+  --sans: "Noto Sans TC", sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{font-size:var(--fs)}
+body{font-family:var(--sans); background:var(--bg); color:var(--text); line-height:1.8; text-wrap:pretty}
+::selection{background:var(--accent-dim); color:var(--text)}
+
+/* ── 頂部終端列 ── */
+.topbar{position:sticky; top:0; z-index:40; background:oklch(14% 0.012 var(--h));
+  border-bottom:1px solid var(--line-soft); font-family:var(--mono); font-size:.72rem;
+  display:flex; align-items:center; gap:18px; padding:9px 24px; color:var(--muted)}
+.topbar .path{color:var(--accent)}
+.topbar .dot{width:8px; height:8px; border:1.5px solid var(--faint); border-radius:50%}
+.topbar .right{margin-left:auto; color:var(--faint)}
+@media (max-width:700px){ .topbar .right{display:none} }
+
+.layout{display:grid; grid-template-columns:248px minmax(0,1fr); max-width:1320px; margin:0 auto; gap:44px; padding:0 28px}
+@media (max-width:980px){ .layout{grid-template-columns:1fr} nav.toc{display:none} }
+
+/* ── TOC ── */
+nav.toc{position:sticky; top:38px; align-self:start; height:calc(100vh - 38px); padding:44px 0 24px; overflow-y:auto}
+nav.toc .toc-title{font-family:var(--mono); font-size:.66rem; letter-spacing:.16em; color:var(--faint); margin-bottom:14px}
+nav.toc .toc-title::before{content:"// "}
+nav.toc a{display:flex; gap:10px; text-decoration:none; color:var(--muted); font-family:var(--mono);
+  font-size:.76rem; padding:6px 10px; border-left:2px solid var(--line-soft)}
+nav.toc a .n{color:var(--faint)}
+nav.toc a:hover{color:var(--text); background:var(--bg-2)}
+nav.toc a.active{color:var(--accent); border-left-color:var(--accent); background:var(--accent-ghost)}
+nav.toc a.active .n{color:var(--accent)}
+
+main{padding:48px 0 120px; min-width:0}
+
+/* ── Hero ── */
+header.hero{border:1px solid var(--line); background:var(--bg-2); padding:40px 44px; margin-bottom:60px; position:relative}
+header.hero::before{content:"/** TECHNICAL_REPORT */"; font-family:var(--mono); font-size:.72rem; color:var(--faint);
+  display:block; margin-bottom:18px; letter-spacing:.1em}
+h1{font-weight:900; font-size:2.5rem; line-height:1.3; letter-spacing:.01em}
+h1 .cursor{display:inline-block; width:.55em; height:1.05em; background:var(--accent); vertical-align:-0.12em; margin-left:6px; animation:blink 1.1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+.subtitle{font-size:1rem; color:var(--muted); margin-top:16px; max-width:46em}
+.stack{display:flex; flex-wrap:wrap; gap:8px; margin-top:26px}
+.chip{font-family:var(--mono); font-size:.7rem; padding:4px 12px; border:1px solid var(--line); color:var(--muted); background:var(--bg)}
+.chip::before{content:"◆ "; color:var(--accent); font-size:.6rem}
+
+/* ── 章節 ── */
+section{margin-bottom:78px}
+h2{font-family:var(--mono); font-weight:700; font-size:1.35rem; margin-bottom:8px; scroll-margin-top:60px; color:var(--text)}
+h2 .cm{color:var(--faint); font-weight:400}
+h2 .no{color:var(--accent)}
+.h2-rule{height:1px; background:linear-gradient(to right, var(--accent) 0 56px, var(--line) 56px); margin:14px 0 28px}
+h3{font-family:var(--mono); font-size:.95rem; font-weight:600; margin:36px 0 14px; color:var(--accent)}
+h3::before{content:"› "; color:var(--faint)}
+p{margin-bottom:14px; max-width:50em}
+p.lede{font-size:1.02rem; color:var(--muted)}
+strong{font-weight:700; color:var(--text)}
+p strong{color:oklch(92% 0.02 var(--h))}
+code{font-family:var(--mono); font-size:.83em; background:var(--panel); border:1px solid var(--line-soft); padding:1px 7px; color:var(--str)}
+ul.plain{list-style:none; max-width:50em}
+ul.plain li{padding:9px 0 9px 26px; position:relative; border-bottom:1px solid var(--line-soft)}
+ul.plain li::before{content:">"; position:absolute; left:4px; color:var(--accent); font-family:var(--mono); font-weight:700}
+
+/* ── 表格 ── */
+table{width:100%; border-collapse:collapse; font-size:.85rem; margin:18px 0; border:1px solid var(--line)}
+th{font-family:var(--mono); font-size:.66rem; letter-spacing:.1em; text-align:left; color:var(--accent);
+  background:var(--panel); border-bottom:1px solid var(--line); padding:9px 14px}
+td{border-bottom:1px solid var(--line-soft); padding:10px 14px; vertical-align:top; color:var(--muted)}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:var(--bg-2)}
+td:first-child{white-space:nowrap; color:var(--text)}
+td.mono, .mono{font-family:var(--mono); font-size:.78rem}
+td.mono:first-child{color:var(--kw)}
+
+/* ── 架構圖 ── */
+.arch{display:grid; gap:12px; margin:26px 0}
+.arch-tier{display:grid; grid-template-columns:120px 1fr; gap:16px}
+.arch-tier .tier-label{font-family:var(--mono); font-size:.66rem; letter-spacing:.12em; color:var(--faint); padding-top:14px}
+.arch-row{display:flex; flex-wrap:wrap; gap:10px}
+.box{border:1px solid var(--line); background:var(--panel); padding:10px 16px; flex:1; min-width:140px}
+.box .bt{font-weight:700; font-size:.86rem}
+.box .bd{font-size:.72rem; color:var(--faint); font-family:var(--mono); margin-top:3px}
+.box.accent{background:var(--accent-ghost); border-color:var(--accent)}
+.box.accent .bt{color:var(--accent)}
+.box.dim{border-style:dashed; background:transparent}
+.tier-arrow{font-family:var(--mono); color:var(--faint); font-size:.72rem; line-height:1; margin:-2px 0 -2px 136px}
+
+/* ── Graph 流程圖 ── */
+.flow{margin:28px 0; font-size:.85rem}
+.fnode{border:1px solid var(--line); background:var(--panel); padding:10px 16px; display:inline-block; min-width:210px}
+.fnode .fn{font-family:var(--mono); font-weight:600; font-size:.8rem; color:var(--text)}
+.fnode .fn::before{content:"⬡ "; color:var(--faint)}
+.fnode .fd{font-size:.73rem; color:var(--muted); margin-top:2px}
+.fnode.llm{background:var(--accent-ghost); border-color:var(--accent)}
+.fnode.llm .fn{color:var(--accent)}
+.fnode.llm .fn::before{content:"⬢ "; color:var(--accent)}
+.fnode.terminal{background:var(--accent); border-color:var(--accent)}
+.fnode.terminal .fn{color:oklch(18% 0.02 var(--h))}
+.fnode.terminal .fn::before{content:""}
+.fnode.terminal .fd{color:oklch(30% 0.04 var(--h))}
+.fcol{display:flex; flex-direction:column; align-items:center}
+.varrow{width:1px; height:24px; background:var(--faint); position:relative}
+.varrow::after{content:""; position:absolute; bottom:0; left:-3.5px; border:4px solid transparent; border-top:6px solid var(--faint); border-bottom:0}
+.varrow.tagged::before{content:attr(data-tag); position:absolute; left:12px; top:2px; font-family:var(--mono); font-size:.64rem; color:var(--num); white-space:nowrap}
+.fbranch{display:grid; grid-template-columns:repeat(auto-fit,minmax(215px,1fr)); gap:14px; width:100%; margin:6px 0}
+.fbranch .lane{border:1px dashed var(--line); padding:14px; background:var(--bg-2)}
+.lane-tag{font-family:var(--mono); font-size:.64rem; color:var(--kw); letter-spacing:.04em; margin-bottom:12px}
+.lane-tag::before{content:"case "}
+.lane-tag::after{content:" :"; color:var(--faint)}
+.lane .fcol{align-items:stretch}
+.lane .fnode{min-width:0; width:100%}
+.loopnote{font-family:var(--mono); font-size:.66rem; color:var(--num); border:1px dashed var(--num); padding:6px 10px; margin:8px 0; display:inline-block; background:var(--bg)}
+.loopnote::before{content:"while: "}
+.fanout{display:grid; grid-template-columns:1fr 1fr; gap:12px; width:100%; max-width:540px}
+
+/* ── 代碼塊（編輯器風）── */
+.snippet{border:1px solid var(--line); background:oklch(14.5% 0.012 var(--h)); margin:20px 0}
+.snippet .sn-bar{display:flex; align-items:center; gap:8px; font-family:var(--mono); font-size:.66rem;
+  color:var(--faint); border-bottom:1px solid var(--line-soft); padding:7px 14px; background:var(--bg-2)}
+.snippet .sn-bar .lang{margin-left:auto; color:var(--accent)}
+.snippet pre{font-family:var(--mono); font-size:.84rem; line-height:1.9; padding:16px 0; overflow-x:auto; counter-reset:ln}
+.snippet pre span.ln{display:block; padding:0 20px 0 0; white-space:pre}
+.snippet pre span.ln::before{counter-increment:ln; content:counter(ln,decimal-leading-zero);
+  display:inline-block; width:46px; text-align:right; margin-right:20px; color:var(--faint);
+  border-right:1px solid var(--line-soft); padding-right:12px}
+.k{color:var(--kw)} .s{color:var(--str)} .n{color:var(--num)} .c{color:var(--faint)} .a{color:var(--accent)}
+.note{font-size:.78rem; color:var(--faint); margin-top:-8px; font-family:var(--mono)}
+
+/* ── 數據摘要 ── */
+.stats{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:1px; background:var(--line-soft); border:1px solid var(--line); margin:28px 0}
+.stat{background:var(--panel); padding:18px 20px}
+.stat .v{font-family:var(--mono); font-weight:700; font-size:1.8rem; color:var(--accent)}
+.stat .k{font-size:.74rem; color:var(--muted); margin-top:2px; font-family:var(--mono)}
+
+/* ── 卡片 ── */
+.duo{display:grid; grid-template-columns:repeat(auto-fit,minmax(290px,1fr)); gap:14px; margin:20px 0}
+.card{border:1px solid var(--line); background:var(--panel); padding:18px 22px; position:relative}
+.card::before{content:""; position:absolute; top:0; left:0; right:0; height:2px; background:var(--accent)}
+.card h4{font-size:.95rem; font-weight:700; margin:6px 0 8px}
+.card p{font-size:.84rem; margin-bottom:6px; color:var(--muted)}
+.card .tag{font-family:var(--mono); font-size:.62rem; color:var(--faint); letter-spacing:.14em}
+.card .tag::before{content:"# "}
+
+/* ── 事件時序 ── */
+.seq{font-family:var(--mono); font-size:.76rem; border:1px solid var(--line); background:var(--panel); margin:18px 0}
+.seq-row{display:grid; grid-template-columns:180px 1fr; border-bottom:1px solid var(--line-soft)}
+.seq-row:last-child{border-bottom:none}
+.seq-row .ev{padding:9px 16px; background:var(--bg-2); color:var(--str); font-weight:600; border-right:1px solid var(--line-soft)}
+.seq-row .ev::before{content:"event: "; color:var(--faint); font-weight:400}
+.seq-row .ds{padding:9px 16px; color:var(--muted); font-family:var(--sans); font-size:.82rem}
+
+/* ── Tweaks ── */
+#tweaks-btn{position:fixed; bottom:48px; right:22px; z-index:60; font-family:var(--mono); font-size:.7rem;
+  background:var(--accent); color:oklch(16% 0.02 var(--h)); border:none; padding:10px 16px; cursor:pointer; letter-spacing:.1em; font-weight:700}
+#tweaks{position:fixed; bottom:92px; right:22px; z-index:60; width:255px; background:var(--bg-2); border:1px solid var(--accent);
+  padding:18px; display:none; box-shadow:0 0 0 1px var(--bg), 8px 8px 0 var(--accent-dim)}
+#tweaks.open{display:block}
+#tweaks .tw-title{font-family:var(--mono); font-size:.64rem; letter-spacing:.16em; color:var(--faint); margin-bottom:10px}
+#tweaks .tw-title::before{content:"$ "}
+#tweaks label{display:block; font-family:var(--mono); font-size:.74rem; margin:12px 0 4px; color:var(--text)}
+#tweaks input[type=range]{width:100%; accent-color:var(--accent)}
+#tweaks .tw-val{color:var(--num)}
+
+/* ── Status bar 頁尾 ── */
+.statusbar{position:fixed; bottom:0; left:0; right:0; z-index:50; background:oklch(13.5% 0.012 var(--h));
+  border-top:1px solid var(--line-soft); font-family:var(--mono); font-size:.66rem; color:var(--faint);
+  display:flex; gap:0; align-items:center}
+.statusbar .seg{padding:6px 16px; border-right:1px solid var(--line-soft)}
+.statusbar .seg.ac{color:var(--accent)}
+.statusbar .seg:last-child{margin-left:auto; border-right:none; border-left:1px solid var(--line-soft)}
+@media (max-width:700px){ .statusbar .seg:nth-child(3),.statusbar .seg:nth-child(4){display:none} }
+main{padding-bottom:140px}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <span class="dot"></span>
+  <span class="path">~/LangGraph_RAG_SYSTEM</span>
+  <span>›</span>
+  <span>docs/project-report-v2.html</span>
+  <span class="right">branch: kccw0077</span>
+</div>
+
+<div class="layout">
+
+<nav class="toc">
+  <div class="toc-title">TABLE_OF_CONTENTS</div>
+  <a href="#s1"><span class="n">01</span>系統總覽</a>
+  <a href="#s2"><span class="n">02</span>系統架構</a>
+  <a href="#s3"><span class="n">03</span>Graph 流程設計</a>
+  <a href="#s4"><span class="n">04</span>Hybrid 檢索演算法</a>
+  <a href="#s5"><span class="n">05</span>CRAG 自我修正閉環</a>
+  <a href="#s6"><span class="n">06</span>意圖分類與路由</a>
+  <a href="#s7"><span class="n">07</span>對話記憶與壓縮</a>
+  <a href="#s8"><span class="n">08</span>多模態輸入</a>
+  <a href="#s9"><span class="n">09</span>表單子系統</a>
+  <a href="#s10"><span class="n">10</span>資安設計</a>
+  <a href="#s11"><span class="n">11</span>營運與可觀測性</a>
+</nav>
+
+<main>
+
+<header class="hero">
+  <h1>營造業知識庫 RAG 系統<span class="cursor"></span></h1>
+  <p class="subtitle">基於 LangGraph 狀態機的企業知識問答系統——整合 Hybrid 檢索、CRAG 自我修正閉環、多模態輸入（影像／語音）與智慧表單代填，將營造工程作業規範轉化為可對話、可產出文件的知識服務。</p>
+  <div class="stack">
+    <span class="chip">LangGraph</span><span class="chip">FastAPI</span><span class="chip">Next.js 16</span>
+    <span class="chip">ChromaDB</span><span class="chip">BM25 + RRF</span><span class="chip">PostgreSQL</span>
+    <span class="chip">GPT-5.4</span><span class="chip">Gemini 3.5 Flash</span><span class="chip">SSE Streaming</span>
+  </div>
+</header>
+
+<!-- ════════ 01 ════════ -->
+<section id="s1">
+  <h2><span class="cm">//</span> <span class="no">01</span> 系統總覽</h2>
+  <div class="h2-rule"></div>
+  <p class="lede">使用者以文字、圖片或語音提問，系統在單一 LangGraph 狀態圖內完成意圖判斷、混合檢索、品質評分與自我修正，最終以 SSE 逐 token 串流回答，並可直接產出可下載的 Word／Excel 表單文件。</p>
+  <div class="stats">
+    <div class="stat"><div class="v">15</div><div class="k">graph_nodes</div></div>
+    <div class="stat"><div class="v">1,287</div><div class="k">kb_chunks</div></div>
+    <div class="stat"><div class="v">6</div><div class="k">intent_classes</div></div>
+    <div class="stat"><div class="v">5</div><div class="k">llm_roles</div></div>
+    <div class="stat"><div class="v">2</div><div class="k">crag_max_retries</div></div>
+  </div>
+  <h3>設計核心原則</h3>
+  <ul class="plain">
+    <li><strong>單一狀態圖、共享 TypedDict State</strong>——所有節點讀寫同一個 GraphState，新功能（如 VLM 圖片）以純加法欄位擴充，舊 checkpoint 完全相容。</li>
+    <li><strong>LLM 角色分工</strong>——主回答、評分、表單結構化、讀圖、語音轉錄各自獨立的模型設定，以 <code>provider:model</code> 字串在 .env 一行切換供應商。</li>
+    <li><strong>重資料不進 State</strong>——圖片 base64、音訊 bytes 永不寫入 checkpoint；State 只存輕量參照（路徑／id），LLM 呼叫時現場讀檔。</li>
+    <li><strong>每一個 LLM 判斷都有防護欄</strong>——結構化輸出 + 越界正規化 + 失敗 fallback，模型輸出異常時系統降級而非崩潰。</li>
+  </ul>
+</section>
+
+<!-- ════════ 02 ════════ -->
+<section id="s2">
+  <h2><span class="cm">//</span> <span class="no">02</span> 系統架構</h2>
+  <div class="h2-rule"></div>
+  <p>四層架構：前端負責串流渲染與多模態擷取；API 層處理認證、限流與 SSE；LangGraph 層是全部智慧所在；資料層拆分三個 PostgreSQL 資料庫與版本化向量庫。</p>
+
+  <div class="arch">
+    <div class="arch-tier">
+      <div class="tier-label">CLIENT</div>
+      <div class="arch-row">
+        <div class="box"><div class="bt">Next.js 16 前端</div><div class="bd">SSE 渲染 · markdown 表格</div></div>
+        <div class="box"><div class="bt">多模態輸入</div><div class="bd">圖片上傳 · MediaRecorder 錄音</div></div>
+        <div class="box"><div class="bt">AuthImage</div><div class="bd">Bearer blob fetch + 快取</div></div>
+      </div>
+    </div>
+    <div class="tier-arrow">│ HTTPS（Tailscale Funnel）· /api rewrite proxy<br>▼</div>
+    <div class="arch-tier">
+      <div class="tier-label">API · FastAPI</div>
+      <div class="arch-row">
+        <div class="box"><div class="bt">JWT 認證</div><div class="bd">access + HttpOnly refresh</div></div>
+        <div class="box"><div class="bt">Rate Limit</div><div class="bd">per-user key（JWT sub）</div></div>
+        <div class="box"><div class="bt">/chat/stream</div><div class="bd">SSE · Semaphore(20)</div></div>
+        <div class="box"><div class="bt">/chat/transcribe</div><div class="bd">STT · 音訊不落地</div></div>
+      </div>
+    </div>
+    <div class="tier-arrow">│ astream_events v2<br>▼</div>
+    <div class="arch-tier">
+      <div class="tier-label">LANGGRAPH</div>
+      <div class="arch-row">
+        <div class="box accent"><div class="bt">StateGraph（15 節點）</div><div class="bd">意圖路由 · CRAG 閉環 · 並行 fan-out</div></div>
+        <div class="box accent"><div class="bt">LLM Factory</div><div class="bd">default / grader / form / vision / audio</div></div>
+      </div>
+    </div>
+    <div class="tier-arrow">│<br>▼</div>
+    <div class="arch-tier">
+      <div class="tier-label">DATA</div>
+      <div class="arch-row">
+        <div class="box"><div class="bt">ChromaDB（版本化）</div><div class="bd">v5 · 1,287 chunks · 藍綠切換</div></div>
+        <div class="box"><div class="bt">BM25 索引</div><div class="bd">jieba 分詞 · 記憶體原子快照</div></div>
+        <div class="box"><div class="bt">PG × 3</div><div class="bd">kb_app · kb_langgraph · kb_search</div></div>
+        <div class="box dim"><div class="bt">磁碟</div><div class="bd">上傳圖 · 產出表單（每日清理）</div></div>
+      </div>
+    </div>
+  </div>
+
+  <h3>LLM 角色分工</h3>
+  <table>
+    <thead><tr><th>ROLE</th><th>MODEL</th><th>職責</th><th>為什麼分開</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">default</td><td class="mono">openai:gpt-5.4</td><td>主回答生成、對話摘要</td><td>品質優先，temperature 0.6 串流</td></tr>
+      <tr><td class="mono">grader</td><td class="mono">openai:gpt-5.4-mini</td><td>意圖分類、檢索評分、查詢改寫、短確認句</td><td>高頻低延遲，結構化輸出穩定</td></tr>
+      <tr><td class="mono">form</td><td class="mono">openai:gpt-5.4</td><td>動態表單 schema 結構化生成</td><td>需要 function-calling 結構化輸出</td></tr>
+      <tr><td class="mono">vision</td><td class="mono">google_genai:gemini-3.5-flash</td><td>圖片 OCR／描述（vision_intake）</td><td>多模態能力與成本</td></tr>
+      <tr><td class="mono">audio</td><td class="mono">google_genai:gemini-3.5-flash</td><td>語音轉文字（/chat/transcribe）</td><td>原生音訊理解，免額外 STT 服務</td></tr>
+    </tbody>
+  </table>
+  <p class="note">統一經 get_llm(role) factory（LangChain init_chat_model），切換供應商只改 .env 的 model 字串前綴。</p>
+</section>
+
+<!-- ════════ 03 ════════ -->
+<section id="s3">
+  <h2><span class="cm">//</span> <span class="no">03</span> Graph 流程設計</h2>
+  <div class="h2-rule"></div>
+  <p>每輪對話從 START 走到 END 是一次完整的狀態演算。流程設計的關鍵決策：<strong>多模態前置</strong>（圖片先轉文字，後續節點零改動）、<strong>單一意圖節點</strong>（取代 keyword 規則堆疊）、<strong>評分後才決定終點</strong>（CRAG），以及 <strong>responder 與 source_filter 並行 fan-out</strong>（回答與來源篩選互不等待）。</p>
+
+  <div class="flow">
+    <div class="fcol">
+      <div class="fnode terminal"><div class="fn">START</div></div>
+      <div class="varrow"></div>
+      <div class="fnode llm"><div class="fn">vision_intake</div><div class="fd">有圖 → Gemini 讀圖，解析併入 query（前 500 字）；無圖 no-op</div></div>
+      <div class="varrow"></div>
+      <div class="fnode"><div class="fn">compact_check</div><div class="fd">tiktoken 計算歷史 token 數</div></div>
+      <div class="varrow tagged" data-tag="if tokens > 8000"></div>
+      <div class="fnode llm"><div class="fn">summarizer（條件）</div><div class="fd">舊訊息壓縮為摘要，保留近 8 則</div></div>
+      <div class="varrow"></div>
+      <div class="fnode llm"><div class="fn">unified_intent</div><div class="fd">六分類結構化輸出 + 越界正規化</div></div>
+      <div class="varrow"></div>
+    </div>
+
+    <div class="fbranch">
+      <div class="lane">
+        <div class="lane-tag">qa | dynamic_form_generate</div>
+        <div class="fcol">
+          <div class="fnode"><div class="fn">retriever</div><div class="fd">Hybrid：向量 + BM25 → RRF → top 8</div></div>
+          <div class="varrow"></div>
+          <div class="fnode"><div class="fn">context_builder</div><div class="fd">來源標頭 + 章節 + 圖片標籤組裝</div></div>
+          <div class="varrow"></div>
+          <div class="fnode llm"><div class="fn">retrieval_grader</div><div class="fd">sufficient / insufficient + 缺漏描述</div></div>
+          <div class="loopnote">insufficient &amp;&amp; retry &lt; 2 → query_rewriter →（改寫成功才重檢索；fallback 直接出場）</div>
+          <div class="varrow tagged" data-tag="form 意圖先過 form_structurer"></div>
+        </div>
+      </div>
+      <div class="lane">
+        <div class="lane-tag">static_form_fill</div>
+        <div class="fcol">
+          <div class="fnode"><div class="fn">form_template_loader</div><div class="fd">載入 docx schema</div></div>
+          <div class="varrow"></div>
+          <div class="fnode llm"><div class="fn">form_fill_collector</div><div class="fd">抽取欄位值，session 跨輪累積</div></div>
+          <div class="varrow tagged" data-tag="status == ready"></div>
+          <div class="fnode"><div class="fn">form_filler</div><div class="fd">寫入 docx 副本 → 下載 token</div></div>
+        </div>
+      </div>
+      <div class="lane">
+        <div class="lane-tag">download | export | 免檢索 qa</div>
+        <div class="fcol">
+          <div class="fnode"><div class="fn">form_exporter</div><div class="fd">prev_form_data → xlsx / csv（不打 LLM）</div></div>
+          <div class="varrow"></div>
+          <div class="fnode" style="border-style:dashed; background:transparent"><div class="fn">直達 responder</div><div class="fd">短確認句或直接回答</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="fcol">
+      <div class="varrow"></div>
+      <div class="fanout">
+        <div class="fnode llm"><div class="fn">responder ∥</div><div class="fd">串流生成回答（依 intent 切換 5 種 prompt）</div></div>
+        <div class="fnode llm"><div class="fn">∥ source_filter</div><div class="fd">並行評估相關來源（不依賴回答）</div></div>
+      </div>
+      <div class="varrow tagged" data-tag="fan-in 等待雙分支"></div>
+      <div class="fnode terminal"><div class="fn">END</div><div class="fd">checkpointer 持久化 → 下輪延續</div></div>
+    </div>
+  </div>
+
+  <h3>節點職責一覽</h3>
+  <table>
+    <thead><tr><th>NODE</th><th>LLM</th><th>職責與設計細節</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">vision_intake</td><td class="mono">vision</td><td>有新圖→OCR 解析併入 query；無新圖但上輪有→沿用解析不污染 query（多輪圖片延續）。失敗降級為純文字流程。</td></tr>
+      <tr><td class="mono">compact_check</td><td class="mono">—</td><td>同步節點，tiktoken cl100k_base 計數，閾值 8,000。</td></tr>
+      <tr><td class="mono">summarizer</td><td class="mono">default</td><td>RemoveMessage 刪舊訊息 + 摘要寫入 DB（重啟可恢復）。</td></tr>
+      <tr><td class="mono">unified_intent</td><td class="mono">grader</td><td>六分類 + need_retrieval + 候選表單比對；越界輸出被正規化降級（詳 §06）。</td></tr>
+      <tr><td class="mono">retriever</td><td class="mono">—</td><td>有改寫 query 時雙路平行檢索再 RRF 融合，原始與改寫訊號都保留。</td></tr>
+      <tr><td class="mono">context_builder</td><td class="mono">—</td><td>同步組裝：來源檔名＋章節標頭＋最多 3 張關聯圖片的 markdown 標籤。</td></tr>
+      <tr><td class="mono">retrieval_grader</td><td class="mono">grader</td><td>評全部 8 chunks × 前 400 字（與 responder 實際 context 對齊），結構化輸出含 missing_information。</td></tr>
+      <tr><td class="mono">query_rewriter</td><td class="mono">grader</td><td>以原始 query 為基礎改寫成 4–10 字檢索短語，防語意漂移；失敗訊號偵測 → fallback 並跳過重複檢索。</td></tr>
+      <tr><td class="mono">form_structurer</td><td class="mono">form</td><td>檢索 context → 結構化表單 JSON（title/columns/rows）。</td></tr>
+      <tr><td class="mono">form_* 三節點</td><td class="mono">grader</td><td>填表 session 狀態機：collecting → ready → completed，跨輪由 checkpointer 保留。</td></tr>
+      <tr><td class="mono">responder</td><td class="mono">default</td><td>依 intent / session 狀態切換 5 種 prompt；圖片原圖只附當輪 LLM call，不進歷史。</td></tr>
+      <tr><td class="mono">source_filter</td><td class="mono">grader</td><td>與 responder 並行，以 query + chunks 評相關來源供前端面板。</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ════════ 04 ════════ -->
+<section id="s4">
+  <h2><span class="cm">//</span> <span class="no">04</span> Hybrid 檢索演算法</h2>
+  <div class="h2-rule"></div>
+  <p class="lede">語意向量擅長同義改寫，BM25 擅長精確術語與編號（「010101」「動員開工」）。兩路各取 top-20，以 Reciprocal Rank Fusion 融合——不需調權重、對分數尺度不敏感。</p>
+
+  <div class="snippet">
+    <div class="sn-bar"><span>hybrid_retrieval</span><span class="lang">algorithm</span></div>
+    <pre><span class="ln"><span class="k">def</span> <span class="a">RRF</span>(d):  <span class="c"># k = 60</span></span><span class="ln">    <span class="k">return</span> Σ  1 / (k + rank_r(d) + 1)   <span class="k">for</span> r <span class="k">in</span> {vector, bm25}</span><span class="ln"></span><span class="ln">vector : text-embedding-3-small → ChromaDB <span class="a">top-20</span></span><span class="ln">bm25   : jieba 分詞（營造領域自訂詞典）→ BM25Okapi <span class="a">top-20</span> <span class="c">(score &gt; 0)</span></span><span class="ln">fusion : 同時命中兩路的 chunk 自動加分 → 取前 <span class="n">8</span> 進 context</span></pre>
+  </div>
+
+  <div class="duo">
+    <div class="card">
+      <div class="tag">CONCURRENCY</div>
+      <h4>原子快照設計</h4>
+      <p>BM25 索引與 corpus 綁成單一 tuple，<code>retrieve()</code> 取 local 快照後運算——admin 觸發重建（<code>POST /admin/vector/refresh-bm25</code>）瞬間換置新索引，進行中的查詢不會發生新舊索引錯位。KB 離線更新後免重啟。</p>
+    </div>
+    <div class="card">
+      <div class="tag">DUAL-PATH</div>
+      <h4>改寫後雙路融合</h4>
+      <p>CRAG 改寫 query 後，retriever 同時用「原始 query」與「改寫 query」平行檢索，再做一次 RRF——改寫只是補充訊號，不會覆蓋使用者原意。向量檢索與 BM25 計算亦以 asyncio.gather 平行。</p>
+    </div>
+  </div>
+
+  <h3>知識庫工程</h3>
+  <ul class="plain">
+    <li>來源為營造作業規範 markdown 化文件，依章節階層切塊，metadata 保留 <code>source_file / parent_h2 / parent_h3 / section_code / image_paths / tags</code>。</li>
+    <li>ChromaDB 採<strong>版本化目錄</strong>（chroma_versions/v1…v5），.env 切 <code>CHROMA_ACTIVE_VERSION</code> 藍綠切換，重建知識庫不影響線上版本。</li>
+    <li>chunk 關聯的規範圖片以 markdown 圖片語法注入 context，LLM 可在回答中直接引用，前端帶認證渲染。</li>
+  </ul>
+</section>
+
+<!-- ════════ 05 ════════ -->
+<section id="s5">
+  <h2><span class="cm">//</span> <span class="no">05</span> CRAG 自我修正閉環</h2>
+  <div class="h2-rule"></div>
+  <p class="lede">Corrective RAG：檢索結果先經 LLM 評分，不足時改寫查詢重試——讓「使用者口語」與「規範文件用語」的落差由系統自己彌平，而不是直接拿差的 context 硬答。</p>
+
+  <table>
+    <thead><tr><th>STAGE</th><th>機制</th><th>防護欄</th></tr></thead>
+    <tbody>
+      <tr><td>評分</td><td>結構化輸出 <code>{decision, reason, missing_information}</code>，評全部 8 chunks × 400 字</td><td>與 responder 實拿 context 對齊，避免「子集評不足、全文其實夠」的假陰性</td></tr>
+      <tr><td>改寫</td><td>missing_information 作為改寫上下文，<strong>永遠以原始 query 為基礎</strong></td><td>防多次 retry 語意漂移；輸出 &gt; 40 字或含「無法／不確定」等失敗訊號 → fallback</td></tr>
+      <tr><td>重試</td><td>上限 2 次；改寫成功 → 雙路 RRF 重檢索 → 再評分</td><td>fallback 回原 query 時<strong>直接跳過重複檢索</strong>走終端路由（相同 query 再檢索一次是純浪費）</td></tr>
+      <tr><td>出場</td><td>sufficient 或達上限 → form 意圖過 form_structurer，其餘並行進 responder</td><td>即使 insufficient 出場，仍以現有最佳 context 作答並標註依據</td></tr>
+    </tbody>
+  </table>
+
+  <div class="snippet">
+    <div class="sn-bar"><span>worst_case_cost</span><span class="lang">analysis</span></div>
+    <pre><span class="ln"><span class="c"># 最壞路徑成本（單輪）</span></span><span class="ln">vision(<span class="n">1</span>) + summarize(<span class="n">1</span>) + intent(<span class="n">1</span>)</span><span class="ln">+ [retrieve → grade(<span class="n">1</span>) → rewrite(<span class="n">1</span>)] × <span class="n">3</span> 輪</span><span class="ln">+ respond(<span class="n">1</span>) + source_filter(<span class="n">1</span>)   <span class="a">≈ 9 次 LLM 呼叫</span></span><span class="ln"><span class="c"># 控制手段：grader 用 mini 模型 · 死迴圈跳過 · 壓縮非每輪觸發</span></span></pre>
+  </div>
+</section>
+
+<!-- ════════ 06 ════════ -->
+<section id="s6">
+  <h2><span class="cm">//</span> <span class="no">06</span> 意圖分類與路由</h2>
+  <div class="h2-rule"></div>
+  <p>捨棄 keyword fast-path（「我要規範的詳細說明」含「我要」就誤判索取檔案），改為<strong>每輪一次 LLM 結構化分類</strong>，prompt few-shot 教規則。多花 ≈300ms 換每輪正確路由。</p>
+
+  <table>
+    <thead><tr><th>INTENT</th><th>路由</th><th>觸發例</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">qa</td><td>檢索 RAG 或直答</td><td>「動員開工需要哪些初期計畫？」</td></tr>
+      <tr><td class="mono">static_form_download</td><td>直達 responder + 下載卡片</td><td>「給我動員開工檢核表」</td></tr>
+      <tr><td class="mono">static_form_fill</td><td>填表 session 狀態機</td><td>「我要填《開工檢核表》」</td></tr>
+      <tr><td class="mono">dynamic_form_generate</td><td>檢索 → form_structurer</td><td>「做一份新人安全是非題」</td></tr>
+      <tr><td class="mono">form_continuation</td><td>帶推斷主題詞再檢索</td><td>「再加 10 題」</td></tr>
+      <tr><td class="mono">dynamic_form_export</td><td>form_exporter（不打 LLM）</td><td>「把剛剛的表匯出成 Excel」</td></tr>
+    </tbody>
+  </table>
+
+  <h3>越界正規化（LLM 防護欄）</h3>
+  <ul class="plain">
+    <li><code>static_form_*</code> 但 target_form_id 不在候選 ∪ session → 降級 qa（防幻覺表單 id）。</li>
+    <li><code>form_continuation</code> 但缺 prev_form_data 或主題詞 → 改 dynamic_form_generate。</li>
+    <li><code>dynamic_form_export</code> 但根本沒有上一份表 → 降級 qa。</li>
+    <li>候選表單若來自「歷史拼接」而非本輪 query 直接命中，qa 路徑不帶——避免問新主題時舊表單下載提示一直黏在回答結尾。</li>
+  </ul>
+</section>
+
+<!-- ════════ 07 ════════ -->
+<section id="s7">
+  <h2><span class="cm">//</span> <span class="no">07</span> 對話記憶與壓縮</h2>
+  <div class="h2-rule"></div>
+  <div class="duo">
+    <div class="card">
+      <div class="tag">CHECKPOINTER</div>
+      <h4>跨輪持久化</h4>
+      <p>LangGraph AsyncPostgresSaver 以 conversation_id 為 thread——messages、填表 session、上一輪表單／圖片參照全部自動跨輪保留，服務重啟對話不中斷。</p>
+    </div>
+    <div class="card">
+      <div class="tag">COMPACTION</div>
+      <h4>token 預算控制</h4>
+      <p>歷史超過 8,000 tokens 時觸發：保留最近 8 則，更舊的由 LLM 壓成摘要（RemoveMessage 刪除原文），摘要同步寫入 app DB——歷史無限長，prompt 成本有上限。</p>
+    </div>
+    <div class="card">
+      <div class="tag">CONTINUITY</div>
+      <h4>prev_* 延續鏈</h4>
+      <p>prev_form_data／prev_image_refs 仿「最近一份」語意：上一輪沒有就繼續往前找，避免中間插一句閒聊就斷鏈。「那張圖的第三欄是什麼？」「再加十題」都能正確接續。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ════════ 08 ════════ -->
+<section id="s8">
+  <h2><span class="cm">//</span> <span class="no">08</span> 多模態輸入</h2>
+  <div class="h2-rule"></div>
+  <h3>影像（VLM）——進 Graph 的前置節點</h3>
+  <ul class="plain">
+    <li>上傳存磁碟、State 只放 <code>{id, path, mime}</code> 參照——base64 永不進 checkpoint。</li>
+    <li>vision_intake 用 Gemini 做客觀 OCR／描述（不答題），解析<strong>前 500 字</strong>併入 query 驅動檢索（全文稀釋 embedding 訊號），完整解析另存供 responder 用全文。</li>
+    <li>生成時原圖再附給 responder 當輪訊息核對像素；多輪追問沿用上輪解析、不重跑讀圖、不污染新檢索。</li>
+  </ul>
+  <h3>語音（STT）——刻意不進 Graph</h3>
+  <p>音訊只是問題的載體，轉成文字後就是純文字 query，沒有「上一段錄音」的延續語意——所以採<strong>方案 A：graph 外轉錄</strong>。前端 MediaRecorder 錄音 → <code>POST /chat/transcribe</code> → Gemini 原生音訊理解轉錄 → 文字填回輸入框讓使用者<strong>確認修正後才送出</strong>。Graph、State、所有節點零改動；轉錄錯誤不會污染檢索；音訊 bytes 不落磁碟。</p>
+  <div class="seq">
+    <div class="seq-row"><div class="ev">image_path</div><div class="ds">upload → 磁碟 → vision_intake（graph 內）→ query enrich → 檢索與回答</div></div>
+    <div class="seq-row"><div class="ev">audio_path</div><div class="ds">錄音 → transcribe（graph 外）→ 輸入框 → 使用者確認 → 以純文字進 graph</div></div>
+  </div>
+</section>
+
+<!-- ════════ 09 ════════ -->
+<section id="s9">
+  <h2><span class="cm">//</span> <span class="no">09</span> 表單子系統</h2>
+  <div class="h2-rule"></div>
+  <p>營造業的核心產出是「文件」。系統把表單拆成四種能力，全部收斂在同一個對話介面：</p>
+  <table>
+    <thead><tr><th>能力</th><th>機制</th></tr></thead>
+    <tbody>
+      <tr><td>靜態表單下載</td><td>registry 比對 form_id → 原版 docx 模板直接下載。</td></tr>
+      <tr><td>AI 代填（多輪）</td><td>schema 欄位分群 → 每輪只追問一組（含 AI 代寫欄位給使用者過目）→ session 狀態機 collecting／ready／completed → 寫入 docx 副本，下載 token 綁 conversation 所有權。</td></tr>
+      <tr><td>動態表單生成</td><td>檢索規範 context → form role 結構化輸出 JSON → responder 以 markdown 表格呈現，支援「再加幾題」延續。</td></tr>
+      <tr><td>匯出</td><td>上一份動態表單 → xlsx／csv 轉檔，純程式不打 LLM。</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ════════ 10 ════════ -->
+<section id="s10">
+  <h2><span class="cm">//</span> <span class="no">10</span> 資安設計</h2>
+  <div class="h2-rule"></div>
+  <table>
+    <thead><tr><th>面向</th><th>實作</th></tr></thead>
+    <tbody>
+      <tr><td>認證</td><td>JWT access（記憶體）+ HttpOnly refresh cookie + token_version 撤銷；bcrypt(12)；Google OAuth 限公司網域。</td></tr>
+      <tr><td>限流</td><td>LLM 端點 per-user key（JWT sub，Funnel 反代下 per-IP 無效）：stream 20／upload 30／transcribe 15 每分鐘；auth 端點 per-IP 3–10／分。</td></tr>
+      <tr><td>路徑防護</td><td>所有檔案服務端點 <code>Path.resolve() + is_relative_to</code>（防 .. 穿越與兄弟目錄前綴繞過）；下載 token 驗 conversation 所有權。</td></tr>
+      <tr><td>上傳硬化</td><td>分塊讀取超限即斷（防記憶體放大）；圖片 magic bytes 判型、以實際內容為準不信 client 宣告；音訊檔頭檢查記警告。</td></tr>
+      <tr><td>資訊洩漏</td><td>內部錯誤只記 log、前端回通用訊息；404 不洩漏資源存在性；certs／DB dump 強制 gitignore。</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ════════ 11 ════════ -->
+<section id="s11">
+  <h2><span class="cm">//</span> <span class="no">11</span> 營運與可觀測性</h2>
+  <div class="h2-rule"></div>
+  <h3>SSE 事件協定</h3>
+  <div class="seq">
+    <div class="seq-row"><div class="ev">step</div><div class="ds">每個 graph 節點啟動即推送，前端顯示「Searching knowledge base…」等即時進度</div></div>
+    <div class="seq-row"><div class="ev">image_reading</div><div class="ds">vision_intake 開始且本輪有新圖 → 「讀取圖片中…」</div></div>
+    <div class="seq-row"><div class="ev">text</div><div class="ds">responder 逐 token 串流（跨 provider 以 .text accessor 統一抽取）</div></div>
+    <div class="seq-row"><div class="ev">sources / form_files</div><div class="ds">graph 完成後推送來源面板資料與下載卡片</div></div>
+    <div class="seq-row"><div class="ev">done / error</div><div class="ds">收尾；全輪 LLM usage 累計寫入訊息 token_count</div></div>
+  </div>
+  <h3>營運機制</h3>
+  <ul class="plain">
+    <li><strong>LangSmith tracing</strong>——每輪 9 個節點的延遲、token、重試率全鏈路可追。</li>
+    <li><strong>每日背景清理</strong>——lifespan 任務每 24h 清 30 天以上的上傳圖與產出表單，關機乾淨取消。</li>
+    <li><strong>BM25 熱重建</strong>——admin 端點免重啟刷新索引；Chroma 換版本走藍綠 + PM2 重啟。</li>
+    <li><strong>失敗不靜默</strong>——回覆存檔、state 讀取、摘要入庫失敗均記 log；LLM 節點失敗降級不崩潰。</li>
+    <li><strong>容量保護</strong>——/chat/stream 全域 Semaphore(20)，滿載回 503 而非排隊雪崩。</li>
+  </ul>
+</section>
+
+</main>
+</div>
+
+<button id="tweaks-btn">TWEAKS</button>
+<div id="tweaks">
+  <div class="tw-title">design_tweaks</div>
+  <label>--accent-hue <span class="tw-val" id="hue-val"></span></label>
+  <input type="range" id="tw-hue" min="0" max="360" step="1">
+  <label>--font-size <span class="tw-val" id="fs-val"></span></label>
+  <input type="range" id="tw-fs" min="13.5" max="18" step="0.5">
+</div>
+
+<div class="statusbar">
+  <div class="seg ac">● LangGraph RAG</div>
+  <div class="seg">UTF-8</div>
+  <div class="seg">zh-Hant</div>
+  <div class="seg">15 nodes · 1287 chunks</div>
+  <div class="seg">Technical Report · 2026</div>
+</div>
+
+<script>
+(function(){
+  const root = document.documentElement;
+  const store = JSON.parse(localStorage.getItem("rag-report-v2-tweaks") || "{}");
+  const hue = document.getElementById("tw-hue");
+  const fs  = document.getElementById("tw-fs");
+  const hueVal = document.getElementById("hue-val");
+  const fsVal  = document.getElementById("fs-val");
+
+  function apply(h, f){
+    root.style.setProperty("--h", h);
+    root.style.setProperty("--fs", f + "px");
+    hueVal.textContent = h + "°";
+    fsVal.textContent = f + "px";
+    localStorage.setItem("rag-report-v2-tweaks", JSON.stringify({h:h, f:f}));
+  }
+  const h0 = store.h ?? 195, f0 = store.f ?? 15.5;
+  hue.value = h0; fs.value = f0; apply(h0, f0);
+  hue.addEventListener("input", () => apply(+hue.value, +fs.value));
+  fs.addEventListener("input",  () => apply(+hue.value, +fs.value));
+
+  document.getElementById("tweaks-btn").addEventListener("click", () =>
+    document.getElementById("tweaks").classList.toggle("open"));
+
+  const links = [...document.querySelectorAll("nav.toc a")];
+  const sections = links.map(a => document.querySelector(a.getAttribute("href")));
+  const onScroll = () => {
+    let idx = 0;
+    sections.forEach((s, i) => { if (s && s.getBoundingClientRect().top < 160) idx = i; });
+    links.forEach((a, i) => a.classList.toggle("active", i === idx));
+  };
+  document.addEventListener("scroll", onScroll, {passive:true});
+  onScroll();
+})();
+</script>
+</body>
+</html>

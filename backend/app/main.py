@@ -1,3 +1,5 @@
+import asyncio
+import contextlib
 import logging
 import mimetypes
 import os
@@ -9,7 +11,6 @@ from contextlib import asynccontextmanager
 # run on the default ProactorEventLoop. Must be set BEFORE asyncio/
 # uvicorn create the loop, so do it at the very top of main.py.
 if sys.platform == "win32":
-    import asyncio
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 _app_logger = logging.getLogger("app")
@@ -86,6 +87,32 @@ async def _bootstrap_initial_admin() -> None:
         print(f"[Bootstrap] Promoted {user.email} to admin")
 
 
+async def _periodic_cleanup() -> None:
+    """每日清理：上傳圖片/文件（30 天）+ 產出表單檔（30 天）+ 文件 session 索引（30 天）。
+
+    取代原本「啟動時掃一次」的做法 — PM2 長駐不重啟時也能持續清理。
+    迴圈先清再睡，保留原啟動掃描行為。best-effort：失敗只記 log，下一輪再試。
+    """
+    from app.rag.session_store import cleanup_old_sessions
+    from app.services.form_fill_writer import cleanup_old_generated
+    from app.services.image_store import cleanup_old_uploads
+
+    while True:
+        try:
+            # 磁碟掃描走 thread，避免大量檔案時卡住 event loop
+            removed_uploads = await asyncio.to_thread(cleanup_old_uploads)
+            removed_generated = await asyncio.to_thread(cleanup_old_generated)
+            removed_sessions = await asyncio.to_thread(cleanup_old_sessions)
+            if removed_uploads or removed_generated or removed_sessions:
+                _app_logger.info(
+                    "[cleanup] removed %d old upload(s), %d old generated form(s), %d old session index(es)",
+                    removed_uploads, removed_generated, removed_sessions,
+                )
+        except Exception:
+            _app_logger.exception("[cleanup] periodic cleanup failed")
+        await asyncio.sleep(86400)
+
+
 @asynccontextmanager
 async def _make_checkpointer():
     """Yield a LangGraph checkpointer appropriate for the configured backend.
@@ -127,18 +154,14 @@ async def lifespan(app: FastAPI):
         print(f"[Startup] LLM_MODEL={settings.llm_model}")
         print(f"[Startup] GRADER_MODEL={settings.grader_model}")
         print(f"[Startup] FORM_MODEL={settings.form_model}")
+        print(f"[Startup] VISION_MODEL={settings.vision_model}")
+        print(f"[Startup] AUDIO_MODEL={settings.audio_model}")
         print(f"[Startup] EMBEDDING_MODEL={settings.embedding_model}")
 
         await _bootstrap_initial_admin()
 
-        # ─── VLM 上傳圖片清理（best-effort；刪除 30 天以上舊上傳，避免磁碟長期累積）───
-        try:
-            from app.services.image_store import cleanup_old_uploads
-            _removed = cleanup_old_uploads()
-            if _removed:
-                print(f"[Startup] cleaned {_removed} old upload image(s)")
-        except Exception:
-            logging.getLogger("app").exception("[Startup] upload cleanup failed")
+        # ─── 每日清理任務（上傳圖 + 產出表單；啟動即先掃一輪）───
+        cleanup_task = asyncio.create_task(_periodic_cleanup())
 
         # ─── SEARCH module bootstrap ───
         # Side-effect imports:
@@ -178,6 +201,9 @@ async def lifespan(app: FastAPI):
         try:
             yield
         finally:
+            cleanup_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await cleanup_task
             await search_engine.dispose()
     # yield 結束（server 關閉）後，async with 自動關閉 conn
 
@@ -225,24 +251,35 @@ app.include_router(search_usage.router, prefix="/api")
 _img_dir = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "data_markdown", "img")
 )
+_IMG_BASE = Path(_img_dir).resolve()
 
 
-@app.get("/api/images/{image_path:path}")
-async def serve_image(image_path: str):
+def _contained_file(candidate: Path) -> Path | None:
+    """resolve 後確認仍在 img/ 內且為檔案；否則 None。
+
+    用 is_relative_to 而非字串 startswith — 字串比對會被同層的
+    img_xxx 兄弟目錄與 .. 穿越繞過。
     """
-    圖片服務端點，支援兩種目錄結構：
+    resolved = candidate.resolve()
+    if resolved.is_relative_to(_IMG_BASE) and resolved.is_file():
+        return resolved
+    return None
+
+
+def _resolve_kb_image(image_path: str) -> Path | None:
+    """解析 KB 圖片路徑，支援兩種目錄結構：
     1. img/<folder>/<file>.png          （無括號，直接存取）
     2. img/<folder with date>/<folder>/<file>.png （有括號的父目錄，多一層）
 
     解析策略：先試直接路徑，找不到就在 img/ 下搜尋同名子目錄。
+    不在 img/ 內（路徑穿越）或檔案不存在 → None。
     """
-    if not os.path.isdir(_img_dir):
-        raise HTTPException(status_code=404, detail="Image directory not found")
+    if not _IMG_BASE.is_dir():
+        return None
 
     # 1. 直接路徑（現有可運作的路徑）
-    direct = os.path.normpath(os.path.join(_img_dir, image_path))
-    if direct.startswith(_img_dir) and os.path.isfile(direct):
-        return FileResponse(direct)
+    if found := _contained_file(_IMG_BASE / image_path):
+        return found
 
     # 2. 搜尋：image_path = "010102工務所辦公室設置/017.png"
     #    → parts[0] = "010102工務所辦公室設置", filename = "017.png"
@@ -250,24 +287,31 @@ async def serve_image(image_path: str):
     if len(parts) >= 2:
         target_folder = parts[0]
         sub_path = "/".join(parts[1:])
-        for entry in os.scandir(_img_dir):
+        for entry in os.scandir(_IMG_BASE):
             if not entry.is_dir():
                 continue
             # 找名稱以 target_folder 開頭的父目錄（含括號版本）
             if entry.name.startswith(target_folder):
-                candidate = os.path.normpath(
-                    os.path.join(entry.path, target_folder, sub_path)
-                )
-                if candidate.startswith(_img_dir) and os.path.isfile(candidate):
-                    return FileResponse(candidate)
+                if found := _contained_file(Path(entry.path) / target_folder / sub_path):
+                    return found
                 # 也試不含 target_folder 中間層的路徑
-                candidate2 = os.path.normpath(
-                    os.path.join(entry.path, sub_path)
-                )
-                if candidate2.startswith(_img_dir) and os.path.isfile(candidate2):
-                    return FileResponse(candidate2)
+                if found := _contained_file(Path(entry.path) / sub_path):
+                    return found
 
-    raise HTTPException(status_code=404, detail=f"Image not found: {image_path}")
+    return None
+
+
+@app.get("/api/images/{image_path:path}")
+async def serve_image(
+    image_path: str,
+    current_user: User = Depends(get_current_user),
+):
+    """KB 圖片服務端點（聊天回覆中的知識庫附圖）。需登入 — 前端
+    MessageBubble 對 /api/ 開頭的圖改用 AuthImage 帶 token 抓 blob。"""
+    path = _resolve_kb_image(image_path)
+    if path is None:
+        raise HTTPException(status_code=404, detail=f"Image not found: {image_path}")
+    return FileResponse(str(path))
 
 
 @app.get("/api/forms")

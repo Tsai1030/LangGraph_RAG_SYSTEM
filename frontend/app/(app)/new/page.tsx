@@ -6,8 +6,10 @@ import { ArrowUp, Route, Receipt, ShieldCheck, Building2, X } from "lucide-react
 import { cn } from "@/lib/utils";
 import api from "@/lib/api";
 import { useChatStore } from "@/store/chatStore";
-import type { ConversationOut, PendingImage } from "@/types";
+import type { ConversationOut, PendingDocument, PendingImage } from "@/types";
+import DocumentCard from "@/components/chat/DocumentCard";
 import FormPickerButton from "@/components/chat/FormPickerButton";
+import VoiceInputButton, { type VoiceState } from "@/components/chat/VoiceInputButton";
 
 const SUGGESTIONS = [
   { q: "工地施工動線規劃", icon: Route },
@@ -18,10 +20,18 @@ const SUGGESTIONS = [
 
 export default function NewPage() {
   const router = useRouter();
-  const { addConversation, setPendingMessage, setPendingImageIds } = useChatStore();
+  const { addConversation, setPendingMessage, setPendingImageIds, setPendingDocuments } =
+    useChatStore();
   const [creating, setCreating] = useState(false);
   const [value, setValue] = useState("");
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
+  const [pendingDocs, setPendingDocs] = useState<PendingDocument[]>([]);
+  const [docError, setDocError] = useState<string | null>(null);
+  // 文件上傳需要 conversation_id（索引綁對話）→ 選檔當下先建立對話，送出時沿用
+  const conversationRef = useRef<ConversationOut | null>(null);
+  // ── 語音輸入（STT）：VoiceInputButton 錄音轉錄，這裡只管 placeholder 與錯誤顯示 ──
+  const [recState, setRecState] = useState<VoiceState>("idle");
+  const [sttError, setSttError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const addImage = (img: PendingImage) =>
@@ -33,28 +43,68 @@ export default function NewPage() {
       return prev.filter((p) => p.image_id !== id);
     });
 
+  // 文件上傳三段式：選檔即顯示 skeleton 卡 → 完成換成正式卡 → 失敗移除並顯示錯誤
+  const startDocument = (doc: PendingDocument) => {
+    setDocError(null);
+    setPendingDocs((prev) => [...prev, doc]);
+  };
+  const finishDocument = (tempId: string, doc: PendingDocument) =>
+    setPendingDocs((prev) => prev.map((p) => (p.document_id === tempId ? doc : p)));
+  const failDocument = (tempId: string, message: string) => {
+    setPendingDocs((prev) => prev.filter((p) => p.document_id !== tempId));
+    setDocError(message);
+  };
+  const removeDocument = (id: string) =>
+    setPendingDocs((prev) => prev.filter((p) => p.document_id !== id));
+
+  const isDocUploading = pendingDocs.some((p) => p.status === "uploading");
+
+  const ensureConversation = useCallback(async () => {
+    if (conversationRef.current) return conversationRef.current.id;
+    const { data } = await api.post<ConversationOut>("/conversations", {});
+    conversationRef.current = data;
+    addConversation(data);
+    return data.id;
+  }, [addConversation]);
+
   const autoResize = (el: HTMLTextAreaElement) => {
     el.style.height = "auto";
     el.style.height = Math.min(el.scrollHeight, 180) + "px";
   };
 
+  const handleTranscript = (text: string) => {
+    setValue((v) => (v.trim() ? v.trimEnd() + " " + text : text));
+    // setValue 後 textarea 內容下一個 frame 才更新，再調整高度
+    requestAnimationFrame(() => {
+      if (textareaRef.current) {
+        autoResize(textareaRef.current);
+        textareaRef.current.focus();
+      }
+    });
+  };
+
   const handleSend = useCallback(async (text: string, imageIds: string[] = []) => {
     const msg = text.trim();
-    if ((!msg && imageIds.length === 0) || creating) return;
+    if ((!msg && imageIds.length === 0 && pendingDocs.length === 0) || creating) return;
+    if (pendingDocs.some((p) => p.status === "uploading")) return; // 文件解析索引中
     setCreating(true);
     try {
-      const { data } = await api.post<ConversationOut>("/conversations", {});
-      addConversation(data);
+      // 上傳過文件時對話已先建立（ensureConversation），直接沿用
+      const conversationId = await ensureConversation();
       setPendingMessage(msg);
       setPendingImageIds(imageIds);
+      setPendingDocuments(pendingDocs);
       pendingImages.forEach((p) => URL.revokeObjectURL(p.preview_url));
-      router.push(`/chat/${data.id}`);
+      router.push(`/chat/${conversationId}`);
     } catch {
       setCreating(false);
     }
-  }, [creating, router, addConversation, setPendingMessage, setPendingImageIds, pendingImages]);
+  }, [creating, router, ensureConversation, setPendingMessage, setPendingImageIds, setPendingDocuments, pendingImages, pendingDocs]);
 
-  const canSend = (value.trim().length > 0 || pendingImages.length > 0) && !creating;
+  const canSend =
+    (value.trim().length > 0 || pendingImages.length > 0 || pendingDocs.length > 0) &&
+    !isDocUploading &&
+    !creating;
 
   const inputBox = (placeholder: string) => (
     <div className={cn(
@@ -63,6 +113,14 @@ export default function NewPage() {
         ? "border-zinc-200 opacity-60"
         : "border-zinc-200 hover:border-zinc-300 focus-within:border-zinc-400 focus-within:shadow-lg"
     )}>
+      {pendingDocs.length > 0 && (
+        <div className="flex flex-wrap gap-2 px-1 pt-1">
+          {pendingDocs.map((doc) => (
+            <DocumentCard key={doc.document_id} doc={doc} onRemove={removeDocument} />
+          ))}
+        </div>
+      )}
+
       {pendingImages.length > 0 && (
         <div className="flex flex-wrap gap-2 px-1">
           {pendingImages.map((img) => (
@@ -90,6 +148,10 @@ export default function NewPage() {
         <FormPickerButton
           onSendMessage={(msg) => handleSend(msg)}
           onAddImage={addImage}
+          onDocumentUploadStart={startDocument}
+          onDocumentUploadDone={finishDocument}
+          onDocumentUploadError={failDocument}
+          getConversationId={ensureConversation}
           disabled={creating}
         />
         <textarea
@@ -106,10 +168,20 @@ export default function NewPage() {
             }
           }}
           disabled={creating}
-          placeholder={placeholder}
+          placeholder={
+            recState === "recording" ? "錄音中…再按一下麥克風結束"
+            : recState === "transcribing" ? "語音轉錄中…"
+            : placeholder
+          }
           rows={1}
           className="flex-1 text-base text-zinc-800 placeholder-zinc-400 bg-transparent outline-none resize-none leading-relaxed disabled:cursor-not-allowed"
           style={{ maxHeight: "180px", overflowY: "auto" }}
+        />
+        <VoiceInputButton
+          disabled={creating}
+          onTranscript={handleTranscript}
+          onStateChange={setRecState}
+          onError={setSttError}
         />
         <button
           onClick={() => handleSend(value, pendingImages.map((p) => p.image_id))}
@@ -123,6 +195,13 @@ export default function NewPage() {
           <ArrowUp size={14} className={canSend ? "text-white" : "text-zinc-400"} />
         </button>
       </div>
+
+      {sttError && (
+        <p className="px-1 text-[12px] text-rose-500">{sttError}</p>
+      )}
+      {docError && (
+        <p className="px-1 text-[12px] text-rose-500">{docError}</p>
+      )}
     </div>
   );
 

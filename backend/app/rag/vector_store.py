@@ -45,16 +45,22 @@ def _resolve_chroma_path() -> str:
     return settings.chroma_persist_path
 
 
-def _get_collection():
-    """取得 ChromaDB collection（lazy singleton）"""
-    global _chroma_client, _collection
-    if _collection is None:
-        chroma_path = _resolve_chroma_path()
+def get_client() -> chromadb.PersistentClient:
+    """取得 ChromaDB client（lazy singleton）。session_store 共用同一個 client。"""
+    global _chroma_client
+    if _chroma_client is None:
         _chroma_client = chromadb.PersistentClient(
-            path=chroma_path,
+            path=_resolve_chroma_path(),
             settings=ChromaSettings(anonymized_telemetry=False),
         )
-        _collection = _chroma_client.get_collection(COLLECTION_NAME)
+    return _chroma_client
+
+
+def _get_collection():
+    """取得 ChromaDB collection（lazy singleton）"""
+    global _collection
+    if _collection is None:
+        _collection = get_client().get_collection(COLLECTION_NAME)
     return _collection
 
 

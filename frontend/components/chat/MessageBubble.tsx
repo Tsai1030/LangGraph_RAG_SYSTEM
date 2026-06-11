@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -9,6 +9,7 @@ import { X, Copy, RotateCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { MessageOut, FormFile, Source } from "@/types";
 import SourcesPanel from "./SourcesPanel";
+import DocumentCard from "./DocumentCard";
 import FormFileCard from "./FormFileCard";
 import AuthImage from "./AuthImage";
 
@@ -17,6 +18,7 @@ interface Props {
   isStreaming?: boolean;
   isFormLoading?: boolean;
   isImageReading?: boolean;
+  currentStep?: string | null;
   streamingSources?: Source[];
   streamingFormFiles?: FormFile[];
   onRetry?: (assistantMessageId: string) => void;
@@ -215,15 +217,27 @@ function createMarkdownComponents(onImageClick: (src: string, alt: string) => vo
     img: (props) => {
       const src = typeof props.src === "string" ? props.src : undefined;
       const alt = typeof props.alt === "string" ? props.alt : "";
+      // 後端 KB 圖（/api/images/...）需要認證 → AuthImage 帶 token 抓 blob；
+      // 其餘外部圖維持普通 <img>
+      const isApiImage = src?.startsWith("/api/");
       return (
         <figure className="my-3">
-          <img
-            src={src}
-            alt={alt}
-            className="max-w-full rounded-lg border border-zinc-200 shadow-sm cursor-zoom-in"
-            onClick={() => src && onImageClick(src, alt)}
-            onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-          />
+          {isApiImage ? (
+            <AuthImage
+              src={src}
+              alt={alt}
+              className="max-w-full rounded-lg border border-zinc-200 shadow-sm cursor-zoom-in"
+              onClick={(url) => onImageClick(url, alt)}
+            />
+          ) : (
+            <img
+              src={src}
+              alt={alt}
+              className="max-w-full rounded-lg border border-zinc-200 shadow-sm cursor-zoom-in"
+              onClick={() => src && onImageClick(src, alt)}
+              onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+            />
+          )}
           {alt && <figcaption className="text-[11px] text-zinc-400 mt-1.5 text-center">{alt}</figcaption>}
         </figure>
       );
@@ -234,10 +248,10 @@ function createMarkdownComponents(onImageClick: (src: string, alt: string) => vo
   };
 }
 
-function ThinkingText() {
+function ThinkingText({ step }: { step?: string | null }) {
   return (
     <span className="text-sm font-medium tracking-wide thinking-gradient select-none">
-      Thinking
+      {step || "Thinking…"}
     </span>
   );
 }
@@ -259,7 +273,7 @@ function ImageReadingText() {
 }
 
 export default function MessageBubble({
-  message, isStreaming = false, isFormLoading = false, isImageReading = false, streamingSources, streamingFormFiles,
+  message, isStreaming = false, isFormLoading = false, isImageReading = false, currentStep, streamingSources, streamingFormFiles,
   onRetry, retryDisabled = false,
 }: Props) {
   const isUser = message.role === "user";
@@ -269,10 +283,16 @@ export default function MessageBubble({
 
   const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
   const handleImageClick = useCallback((src: string, alt: string) => setLightbox({ src, alt }), []);
-  const markdownComponents = createMarkdownComponents(handleImageClick);
+  // useMemo 必要：串流時每個 token 觸發重渲染，若 components 物件每次都是新
+  // identity，react-markdown 會把所有圖片元件 unmount/remount → AuthImage 重打 API
+  const markdownComponents = useMemo(
+    () => createMarkdownComponents(handleImageClick),
+    [handleImageClick]
+  );
 
   if (isUser) {
     const images = message.meta?.images ?? [];
+    const documents = message.meta?.documents ?? [];
     return (
       <>
         {lightbox && (
@@ -280,6 +300,13 @@ export default function MessageBubble({
         )}
         <div className="flex justify-end px-6 animate-fade-up">
           <div className="max-w-[72%] flex flex-col items-end gap-2">
+            {documents.length > 0 && (
+              <div className="flex flex-wrap gap-2 justify-end">
+                {documents.map((doc) => (
+                  <DocumentCard key={doc.document_id} doc={doc} />
+                ))}
+              </div>
+            )}
             {images.length > 0 && (
               <div className="flex flex-wrap gap-2 justify-end">
                 {images.map((img) => (
@@ -323,7 +350,7 @@ export default function MessageBubble({
             ) : isImageReading ? (
               <ImageReadingText />
             ) : (
-              <ThinkingText />
+              <ThinkingText step={currentStep} />
             )}
           </div>
 

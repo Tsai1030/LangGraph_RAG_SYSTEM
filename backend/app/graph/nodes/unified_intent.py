@@ -132,6 +132,7 @@ def _build_user_prompt(
     prev_form_data: Optional[dict],
     fill_session: dict,
     history_text: str,
+    doc_names: Optional[list[str]] = None,
 ) -> str:
     """組裝給 LLM 的 user prompt。"""
     if candidates:
@@ -160,12 +161,21 @@ def _build_user_prompt(
     else:
         fill_hint = "無進行中／可重啟的填表 session"
 
-    return (
+    doc_hint = (
+        f"本對話已上傳文件：{'、'.join(doc_names)}（使用者問題可能針對這些文件內容）"
+        if doc_names
+        else None
+    )
+
+    prompt = (
         f"對話歷史：\n{history_text}\n\n"
         f"當前訊息：{query}\n\n"
         f"候選靜態表：\n{cand_lines}\n\n"
         f"補充資訊：{prev_form_hint}\n{fill_hint}"
     )
+    if doc_hint:
+        prompt += f"\n{doc_hint}"
+    return prompt
 
 
 def _normalize_decision(
@@ -263,11 +273,12 @@ async def _llm_classify(
     prev_form_data: Optional[dict],
     fill_session: dict,
     recent_messages: list,
+    doc_names: Optional[list[str]] = None,
 ) -> IntentDecision:
     """單次 LLM call 取得意圖判斷。"""
     history_text = _build_history_text(recent_messages)
     user_prompt = _build_user_prompt(
-        query, candidates, prev_form_data, fill_session, history_text,
+        query, candidates, prev_form_data, fill_session, history_text, doc_names,
     )
 
     llm = get_llm("grader", temperature=0).with_structured_output(IntentDecision)
@@ -315,8 +326,12 @@ async def unified_intent(state: GraphState) -> dict:
         len(recent),
     )
 
+    doc_names = [r["filename"] for r in state.get("document_refs") or []]
+
     # LLM 分類（每輪都打；不再用「首輪→qa」fast-path 因為首輪可能是動態表單請求）
-    decision = await _llm_classify(query, candidates, prev_form_data, fill_session, recent)
+    decision = await _llm_classify(
+        query, candidates, prev_form_data, fill_session, recent, doc_names,
+    )
 
     logger.info(
         "[unified_intent] LLM | intent=%s target=%s need_retr=%s | "
@@ -337,6 +352,13 @@ async def unified_intent(state: GraphState) -> dict:
         )
 
     update = _build_state_update(intent, target_id, decision, candidates, candidates_from_history)
+
+    # 對話有上傳文件且為 qa → 強制檢索（答案很可能在 session 索引裡，
+    # 不能讓 LLM 因問題「看起來不需查 KB」而跳過 retriever）
+    if doc_names and update["intent"] == "qa" and not update["need_retrieval"]:
+        logger.info("[unified_intent] 已上傳文件 → 強制 need_retrieval=True")
+        update["need_retrieval"] = True
+
     logger.info(
         "[unified_intent] STATE | intent=%s | matched_forms=%s | form_explicit=%s | "
         "need_retrieval=%s | is_form_continuation=%s",

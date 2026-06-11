@@ -47,6 +47,8 @@ def _resolve_model_spec(role: str) -> str:
         "default": settings.llm_model,
         "grader":  settings.grader_model,
         "form":    settings.form_model,
+        "vision":  settings.vision_model,
+        "audio":   settings.audio_model,
     }
     if role not in spec_map:
         raise ValueError(f"Unknown LLM role: {role!r} (expected one of {list(spec_map)})")
@@ -62,7 +64,7 @@ def get_llm(role: str = "default", **kwargs) -> BaseChatModel:
     """回傳一個 LangChain BaseChatModel。
 
     Args:
-        role: "default" / "grader" / "form" — 對應 settings 的三種角色 model。
+        role: "default" / "grader" / "form" / "vision" / "audio" — 對應 settings 的角色 model。
         **kwargs: 直接透傳給 init_chat_model（如 temperature, streaming, stream_usage 等）。
                   provider 不支援的 kwarg 會被忽略（如 stream_usage 對 Gemini 無作用）。
 

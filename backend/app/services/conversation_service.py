@@ -137,6 +137,10 @@ async def delete_conversation(
     except Exception:
         logger.exception("[delete_conversation] generated_forms 清理失敗 conv=%s", conversation_id)
 
+    # 上傳文件的 session 向量索引（delete_session 內部已 best-effort）
+    from app.rag.session_store import delete_session
+    delete_session(conversation_id)
+
     if checkpointer is not None:
         try:
             await checkpointer.adelete_thread(conversation_id)

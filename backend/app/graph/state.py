@@ -86,3 +86,11 @@ class GraphState(TypedDict):
     # 多輪延續：上一輪的圖片參照與解析（仿 prev_form_data；本輪無新圖時沿用「最近一張」）
     prev_image_refs: list[dict]
     prev_image_understanding: Optional[str]
+
+    # ── 文件附件（聊天上傳 PDF/DOCX/PPTX）──────────────────────
+    # document_refs：本輪生效的文件參照（chat_stream 已處理沿用邏輯）
+    #   [{"id": "<hex>", "path": "<磁碟路徑>", "filename": "<原始檔名>"}]
+    # 文件內容不進 state — 已在上傳時 embed 進 session_{conversation_id} collection，
+    # retriever 看到 document_refs 非空時會同時查 KB 與 session 索引
+    document_refs: list[dict]
+    prev_document_refs: list[dict]

@@ -259,3 +259,26 @@ def delete_generated_for_conversation(conversation_id: str) -> int:
     if deleted:
         logger.info("[form_fill] deleted %d generated files for conversation %s", deleted, conversation_id)
     return deleted
+
+
+def cleanup_old_generated(max_age_days: int = 30) -> int:
+    """刪除 GENERATED_DIR 內超過 max_age_days 的產出檔（保留 .gitkeep）。
+
+    對話刪除時已有 delete_generated_for_conversation 清理；這裡補
+    「對話還在但檔案早已過期」的長尾，由 main.py 的每日清理任務呼叫。
+    best-effort：單檔失敗記 log 不中斷，回傳刪除數。
+    """
+    if not GENERATED_DIR.is_dir():
+        return 0
+    cutoff = time.time() - max_age_days * 86400
+    removed = 0
+    for p in GENERATED_DIR.iterdir():
+        if not p.is_file() or p.name == ".gitkeep":
+            continue
+        try:
+            if p.stat().st_mtime < cutoff:
+                p.unlink()
+                removed += 1
+        except OSError as exc:
+            logger.warning("[form_fill] cleanup failed for %s: %s", p.name, exc)
+    return removed

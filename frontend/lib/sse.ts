@@ -23,7 +23,9 @@ export async function streamChat(
   onSources: (sources: Source[]) => void,
   onDone: () => void,
   signal?: AbortSignal,
-  imageIds: string[] = []
+  imageIds: string[] = [],
+  onStep?: (node: string, label: string) => void,
+  documentIds: string[] = [],
 ): Promise<void> {
   let token = getAccessToken();
 
@@ -37,7 +39,12 @@ export async function streamChat(
         "Content-Type": "application/json",
         ...(t ? { Authorization: `Bearer ${t}` } : {}),
       },
-      body: JSON.stringify({ conversation_id: conversationId, message, image_ids: imageIds }),
+      body: JSON.stringify({
+        conversation_id: conversationId,
+        message,
+        image_ids: imageIds,
+        document_ids: documentIds,
+      }),
       signal,
     });
 
@@ -91,6 +98,9 @@ export async function streamChat(
           break;
         case "form_files":
           onFormFiles(event.data);
+          break;
+        case "step":
+          onStep?.(event.node, event.label);
           break;
         case "sources":
           onSources(event.data);

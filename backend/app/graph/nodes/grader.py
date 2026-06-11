@@ -49,8 +49,10 @@ async def retrieval_grader(state: GraphState) -> dict:
             "grader_missing_information": "未能取得任何相關文件片段",
         }
 
+    # 與 responder 實際拿到的 context 對齊：評全部 chunks（retriever 回 8 筆），
+    # 只看前 5 筆會出現「grader 說不足但全文其實夠」的假陰性，多燒一輪 rewrite
     previews: list[str] = []
-    for i, chunk in enumerate(chunks[:5]):
+    for i, chunk in enumerate(chunks):
         meta = chunk.get("metadata", {})
         source = meta.get("source_file", "")
         h2 = meta.get("parent_h2", "")
@@ -59,7 +61,7 @@ async def retrieval_grader(state: GraphState) -> dict:
             header += f" 【{source}】"
         if h2:
             header += f"【{h2}】"
-        content = chunk.get("document", "")[:300]
+        content = chunk.get("document", "")[:400]
         previews.append(f"{header}\n{content}")
 
     grader_context = "\n\n".join(previews)
@@ -68,7 +70,7 @@ async def retrieval_grader(state: GraphState) -> dict:
 
     result: GraderOutput = await llm.ainvoke([
         SystemMessage(content=get_prompt("grader")),
-        HumanMessage(content=f"問題：{query}\n\n參考文件片段（每份取前300字）：\n{grader_context}"),
+        HumanMessage(content=f"問題：{query}\n\n參考文件片段（每份取前400字）：\n{grader_context}"),
     ])
 
     logger.info(

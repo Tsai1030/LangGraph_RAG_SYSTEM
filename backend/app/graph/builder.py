@@ -20,7 +20,9 @@ Graph 流程：
                                                                                               context_builder
                                                                                                     │
                                                                                           retrieval_grader
-                                                                                            ├─ insufficient (<2 retries) ─► query_rewriter ─► retriever
+                                                                                            ├─ insufficient (<2 retries) ─► query_rewriter
+                                                                                            │     ├─ 改寫成功 ──────────────► retriever（重新檢索）
+                                                                                            │     └─ 改寫失敗(fallback原query) ► 終端路由（跳過重複檢索）
                                                                                             └─ sufficient / max retries ─► route_post_grader
                                                                                                                               ├─ form intents ─► form_structurer ─► [responder ∥ source_filter] → END
                                                                                                                               └─ qa ──────────► [responder ∥ source_filter] → END
@@ -113,6 +115,30 @@ def _route_grader(state: GraphState) -> Union[str, list[str]]:
     return ["responder", "source_filter"]
 
 
+def _route_rewriter(state: GraphState) -> Union[str, list[str]]:
+    """
+    query_rewriter 後的路由：
+    - 改寫出新 query → retriever 重新檢索
+    - 改寫失敗（fallback 回原 query）→ 跳過重複檢索，直接走與 _route_grader
+      sufficient 分支相同的終端路由。retriever 對相同 query 會得到幾乎相同
+      的結果，再 grade 一次只是白燒一輪 LLM；上一輪的 retrieved_chunks /
+      context / sources 仍在 state，行為等同既有的 max-retries 出口。
+
+    比較語意刻意與 retrieval.py 的雙路 RRF gate 一致（.strip() 不等式）——
+    確保「會進 retriever 的」一定是 retriever 會做雙路融合的情況。
+    註：第二次改寫若重複產出與第一次相同的「改寫版」query（非原 query），
+    仍會再檢索一次；RRF 去重讓成本可接受，不另外加 state 偵測。
+    """
+    rewritten = (state.get("retrieval_query") or "").strip()
+    if rewritten and rewritten != state["query"].strip():
+        return "retriever"
+
+    logger.info("[route_rewriter] 改寫 fallback 回原 query，跳過重複檢索")
+    if state.get("intent") in _FORM_INTENTS:
+        return "form_structurer"
+    return ["responder", "source_filter"]
+
+
 def build_graph(checkpointer=None):
     """
     建立並編譯 LangGraph StateGraph。
@@ -161,9 +187,10 @@ def build_graph(checkpointer=None):
     graph.add_edge("retriever", "context_builder")
 
     # CRAG 閉環：context_builder → retrieval_grader → (rewriter→retriever) 或 終端路由
+    # rewriter 改寫失敗（fallback 原 query）時跳過重複檢索直接走終端路由
     graph.add_edge("context_builder", "retrieval_grader")
     graph.add_conditional_edges("retrieval_grader", _route_grader)
-    graph.add_edge("query_rewriter", "retriever")
+    graph.add_conditional_edges("query_rewriter", _route_rewriter)
 
     # form_structurer → [responder ∥ source_filter] 並行
     graph.add_edge("form_structurer", "responder")

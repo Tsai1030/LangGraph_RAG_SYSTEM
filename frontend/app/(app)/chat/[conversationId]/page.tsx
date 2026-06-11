@@ -12,6 +12,7 @@ import InputBar from "@/components/chat/InputBar";
 import type {
   ConversationDetail,
   MessageOut,
+  PendingDocument,
   Source,
 } from "@/types";
 
@@ -25,10 +26,13 @@ export default function ChatPage() {
     setPendingMessage,
     pendingImageIds,
     setPendingImageIds,
+    pendingDocuments,
+    setPendingDocuments,
     conversations,
     updateConversationTitle,
     startStreaming,
     appendStreamingText,
+    setStreamingStep,
     setStreamingFormLoading,
     setStreamingImageReading,
     setStreamingFormFiles,
@@ -51,6 +55,7 @@ export default function ChatPage() {
   const isStreaming = streamingState?.isStreaming ?? false;
   const isFormLoading = streamingState?.isFormLoading ?? false;
   const isImageReading = streamingState?.isImageReading ?? false;
+  const currentStep = streamingState?.currentStep ?? null;
   const streamingMessage = streamingState?.streamingMessage ?? null;
   const streamingFormFiles = streamingState?.streamingFormFiles ?? [];
   const streamingSources = streamingState?.streamingSources ?? [];
@@ -95,7 +100,7 @@ export default function ChatPage() {
   }, [conversationId, setCurrentMessages]);
 
   const handleSend = useCallback(
-    async (text: string, imageIds: string[] = []) => {
+    async (text: string, imageIds: string[] = [], documents: PendingDocument[] = []) => {
       if (!conversationId || isStreaming) return;
 
       const conv = conversations.find((c) => c.id === conversationId);
@@ -103,13 +108,21 @@ export default function ChatPage() {
         updateConversationTitle(conversationId, text.slice(0, 30));
       }
 
+      const documentIds = documents.map((d) => d.document_id);
+
       const userMsg: MessageOut = {
         id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
         role: "user",
         content: text,
-        meta: imageIds.length
-          ? { images: imageIds.map((id) => ({ image_id: id })) }
-          : null,
+        meta:
+          imageIds.length || documents.length
+            ? {
+                images: imageIds.length
+                  ? imageIds.map((id) => ({ image_id: id }))
+                  : undefined,
+                documents: documents.length ? documents : undefined,
+              }
+            : null,
         created_at: new Date().toISOString(),
       };
       appendMessage(userMsg);
@@ -173,7 +186,11 @@ export default function ChatPage() {
             delete abortControllersRef.current[conversationId];
           },
           controller.signal,
-          imageIds
+          imageIds,
+          (_node, label) => {
+            setStreamingStep(conversationId, label);
+          },
+          documentIds,
         );
       } catch (err: unknown) {
         clearStreaming(conversationId);
@@ -233,6 +250,7 @@ export default function ChatPage() {
       appendMessage,
       startStreaming,
       appendStreamingText,
+      setStreamingStep,
       setStreamingFormLoading,
       setStreamingImageReading,
       setStreamingFormFiles,
@@ -243,13 +261,19 @@ export default function ChatPage() {
   );
 
   useEffect(() => {
-    if (loading || (!pendingMessage && pendingImageIds.length === 0)) return;
+    if (
+      loading ||
+      (!pendingMessage && pendingImageIds.length === 0 && pendingDocuments.length === 0)
+    )
+      return;
     const msg = pendingMessage ?? "";
     const imgs = pendingImageIds;
+    const docs = pendingDocuments;
     setPendingMessage(null);
     setPendingImageIds([]);
-    handleSend(msg, imgs);
-  }, [handleSend, loading, pendingMessage, pendingImageIds, setPendingMessage, setPendingImageIds]);
+    setPendingDocuments([]);
+    handleSend(msg, imgs, docs);
+  }, [handleSend, loading, pendingMessage, pendingImageIds, pendingDocuments, setPendingMessage, setPendingImageIds, setPendingDocuments]);
 
   const handleStop = () => {
     if (!conversationId) return;
@@ -301,6 +325,7 @@ export default function ChatPage() {
         streamingSources={streamingSources}
         isFormLoading={isFormLoading}
         isImageReading={isImageReading}
+        currentStep={currentStep}
         onSuggestedQuery={handleSend}
         loading={loading}
         onAtBottomChange={setIsAtBottom}
@@ -347,6 +372,7 @@ export default function ChatPage() {
         onStop={handleStop}
         isStreaming={isStreaming}
         disabled={loading}
+        conversationId={conversationId}
       />
     </div>
   );

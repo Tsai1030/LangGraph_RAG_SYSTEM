@@ -18,9 +18,10 @@ _DICT_PATH = Path(__file__).parent / "jieba_dict.txt"
 if _DICT_PATH.exists():
     jieba.load_userdict(str(_DICT_PATH))
 
-# BM25 lazy singleton
-_bm25: BM25Okapi | None = None
-_corpus: list[dict] | None = None
+# BM25 lazy singleton — (index, corpus) 綁成一個 tuple 原子換置：
+# retrieve() 取 local 快照後使用，rebuild 換新 tuple 不會發生「舊 index 配
+# 新 corpus」的錯位（兩個獨立全域在 await 點之間可能被換掉一半）。
+_bm25_state: tuple[BM25Okapi, list[dict]] | None = None
 _lock = asyncio.Lock()
 
 
@@ -30,36 +31,55 @@ def _tokenize(text: str) -> list[str]:
     return [w for w in words if re.search(r"[\u4e00-\u9fff]|[a-zA-Z0-9]", w)]
 
 
-async def _ensure_bm25() -> None:
-    global _bm25, _corpus
-    if _bm25 is not None:
-        return
+async def _build_bm25_state() -> tuple[BM25Okapi, list[dict]]:
+    """從 ChromaDB 全量載入文件並建 BM25 索引。
+
+    tokenize + 建索引是 CPU-bound，移到 thread 執行——admin 觸發 rebuild
+    時不卡住正在串流的對話。
+    """
+    docs = await get_all_documents()
+    bm25 = await asyncio.to_thread(
+        lambda: BM25Okapi([_tokenize(d["document"]) for d in docs])
+    )
+    return bm25, docs
+
+
+async def _ensure_bm25() -> tuple[BM25Okapi, list[dict]]:
+    global _bm25_state
+    if _bm25_state is not None:
+        return _bm25_state
     async with _lock:
-        if _bm25 is not None:
-            return
-        docs = await get_all_documents()
-        _corpus = docs
-        _bm25 = BM25Okapi([_tokenize(d["document"]) for d in docs])
+        if _bm25_state is None:
+            _bm25_state = await _build_bm25_state()
+        return _bm25_state
+
+
+async def rebuild_bm25() -> int:
+    """重建 BM25 索引（KB 離線更新後由 admin 端點觸發，免重啟）。
+
+    注意：重建讀的是「當前已開啟」的 Chroma collection；若換了
+    CHROMA_ACTIVE_VERSION 仍需重啟（vector_store 的 client 是 process 級快取）。
+    回傳索引的文件數。
+    """
+    global _bm25_state
+    async with _lock:
+        _bm25_state = await _build_bm25_state()
+        return len(_bm25_state[1])
 
 
 def rrf(
-    vector_hits: list[dict],
-    bm25_hits: list[dict],
+    *hit_lists: list[dict],
     k: int = 60,
 ) -> list[dict]:
-    """Reciprocal Rank Fusion：合併兩個排序清單。"""
+    """Reciprocal Rank Fusion：合併任意數量的排序清單（向量 / BM25 / session）。"""
     scores: dict[str, float] = {}
     id_to_chunk: dict[str, dict] = {}
 
-    for rank, chunk in enumerate(vector_hits):
-        cid = chunk["id"]
-        scores[cid] = scores.get(cid, 0.0) + 1.0 / (k + rank + 1)
-        id_to_chunk[cid] = chunk
-
-    for rank, chunk in enumerate(bm25_hits):
-        cid = chunk["id"]
-        scores[cid] = scores.get(cid, 0.0) + 1.0 / (k + rank + 1)
-        id_to_chunk[cid] = chunk
+    for hits in hit_lists:
+        for rank, chunk in enumerate(hits):
+            cid = chunk["id"]
+            scores[cid] = scores.get(cid, 0.0) + 1.0 / (k + rank + 1)
+            id_to_chunk[cid] = chunk
 
     return [
         id_to_chunk[cid]
@@ -75,21 +95,22 @@ async def retrieve(
     Hybrid 搜尋：向量 top-20 + BM25 top-20 → RRF → 回傳前 n_results 筆。
     向量搜尋與 BM25 計算透過 asyncio.gather 平行執行。
     """
-    await _ensure_bm25()
+    # 取 local 快照：後續即使 rebuild_bm25 換掉全域，index 與 corpus 仍配對一致
+    bm25, corpus = await _ensure_bm25()
 
     tokens = _tokenize(query)
 
     # 向量搜尋（async）與 BM25 計算（CPU，移至 thread）平行執行
     vector_hits, bm25_scores = await asyncio.gather(
         search(query, n_results=20),
-        asyncio.to_thread(_bm25.get_scores, tokens),  # type: ignore[union-attr]
+        asyncio.to_thread(bm25.get_scores, tokens),
     )
 
     top_indices = sorted(
         range(len(bm25_scores)), key=lambda i: bm25_scores[i], reverse=True
     )[:20]
     bm25_hits = [
-        _corpus[i]  # type: ignore[index]
+        corpus[i]
         for i in top_indices
         if bm25_scores[i] > 0
     ]
